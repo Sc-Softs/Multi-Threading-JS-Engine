@@ -15,6 +15,8 @@
 #include<string.h>
 #include<setjmp.h>
 #include<unistd.h>
+#include <sys/dir.h>
+#include <sys/stat.h>
 
 /**************************Print Function***************************/
 //一个参数value
@@ -140,11 +142,42 @@ static void CreateThread(){
 }
 /*****************************Run First Task*********************************/
 static void JsContextTask(struct JsEngine* e,void* data){
-	struct JsAstNode* ast = NULL;
-	struct JsValue v;
-	ast = JsParseFile(JS_PARSER_DEBUG_ERROR,"../file.js");
-	JsAssert(ast != NULL);
-	JsEval(e,ast,&v);
+	char* path = "../../test/";
+	DIR *pdir;
+    struct dirent *pdirent;
+    char temp[256];
+    pdir = opendir(path);
+    if(pdir)
+    {
+        while((pdirent = readdir(pdir)))
+        {
+            //跳过"."和".."
+            if(strcmp(pdirent->d_name, ".") == 0
+                    || strcmp(pdirent->d_name, "..") == 0)
+                continue;
+			sprintf(temp,"%s%s",path,pdirent->d_name);
+			printf("open test file  : %s \n", temp);
+			//测试test/*文件
+			JS_TRY(0){
+				struct JsAstNode* ast = NULL;
+				struct JsValue v;
+				ast = JsParseFile(JS_PARSER_DEBUG_ERROR,temp);
+				JsAssert(ast != NULL);
+				JsEval(e,ast,&v);
+			}
+			struct JsValue* err;
+			JS_CATCH(err){
+				JsPrintValue(err);
+				JsPrintStack(JsGetExceptionStack());
+			}
+        }
+    }
+    else
+    {
+        printf("opendir error:%s\n", path);
+    }
+    closedir(pdir);
+
 }
 int main(){
 	JsCreateVm(TRUE,0,NULL, NULL);
