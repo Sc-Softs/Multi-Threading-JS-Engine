@@ -100,6 +100,7 @@
 "/*"                        BEGIN(IN_COMMENT);
 "//".*$                     { }
 [\n]                        { return tLINETERMINATOR;}
+[\r\n]                      { return tLINETERMINATOR;}
 .                           { 
     if (!isspace(*yytext))
     {
