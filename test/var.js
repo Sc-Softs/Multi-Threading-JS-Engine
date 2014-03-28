@@ -2,7 +2,7 @@ print("===========test var statement==========");
 var a = 1, b = {}, c = 2;
 print( (a == 1 && b == b && c == 2) == true ? "success" : "fail");
 try{
-	print( d== undefined);
+	print( varSepcDiefineVar032 == undefined);
 	print("fail");
 }catch(e){
 	print("success");

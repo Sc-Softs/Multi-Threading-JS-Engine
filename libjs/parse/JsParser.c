@@ -2365,7 +2365,8 @@ struct JsAstNode* JsParseFile(int debug, char* filename){
 	}
 	yyset_in(file,lexer);
 	parser->lexer = lexer;
-	parser->filename =filename;
+	parser->filename = (char*)JsMalloc(strlen(filename) + 4);
+	strcpy(parser->filename,filename);
 	
 	if(debug >= JS_PARSER_DEBUG_ALL){
 		//开启lexer的调试
