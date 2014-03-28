@@ -12,7 +12,7 @@
 #include<stdio.h>
 #include<string.h>
 #include<pthread.h>
-
+#include<unistd.h>
 pthread_mutex_t globalLock = PTHREAD_MUTEX_INITIALIZER;
 //配置一个程序内部使用, 可以计数的锁的属性
 static pthread_mutexattr_t* lock_attr = NULL;;
@@ -78,7 +78,11 @@ void JsCloseThread(JsThread thread){
 	pthread_t* p = (pthread_t*)thread;
 	pthread_cancel(*p);
 }
-
+void JsSleep(long time){
+	if(time < 0)
+		return;
+	usleep(time*1000);
+}
 void JsHalt(){
 	exit(0);
 }

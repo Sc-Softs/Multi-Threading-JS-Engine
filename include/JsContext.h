@@ -10,7 +10,11 @@ struct JsFunction;
 
 /*
 	上下文, 对执行过程的控制, 每个JsContext只属于一个线程(Engine,NIO)
-	所以不会发生多线程占用, 数据要被独占, 不能给其他对象使用
+	所以不会发生多线程占用, 内部属性是被独占的, 不能给其他Context使用, 
+	可以通过copy来完成数据复制 
+
+	*在开启新线程(NIO 和 Thread.start() )的时候, 需要在开启前处理完JsContext变量,
+	不然会发生不可测的后果.
 */
 struct JsContext{
 	
@@ -44,7 +48,7 @@ struct JsContext{
 	/*
 		该线程当前所在的线程信息, 作为Stop Engine的时候停止的参数
 		当该Context不占用线程的时候, 设置为NULL, 如加入Engine.waits
-		队列中
+		队列中, 在先开启线程的时候, 必须配置该属性, 否则会脱离管理
 	*/
 	JsThread 	thread;
 	//属性在Dispatch中被修改

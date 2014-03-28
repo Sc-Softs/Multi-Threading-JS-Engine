@@ -6,8 +6,6 @@ print("=====================test Base API===========");
 	eval("print(this)");
 	print(isNaN(1));
 	print(isNaN(NaN));
-	
-	
 	var c = new Object(1);
 	for(var name in c ){
 		print(name);
@@ -37,33 +35,4 @@ print("=====================test Base API===========");
 	for(var i = 0; i < string.length;++i){
 		print(string.charAt(i))
 	}
-	var b = new Boolean(true);
-	print(b);
-	
-	var a = new Number("1233");
-	print(a);
 })();
-setTimeout(function(){
-	print("hello setTimeout");
-	throw "finish";
-},1);
-
-synchronized function funa(id){
-	for(var i = 0 ; i < 100;++i)
-		print("thread ["+id+"]: "+i);
-	throw "finish"
-}
-var i = 0;
-var lock = {};
-var fCreateNewThread = function(id,fun){
-	thread(function(){
-		synchronized(lock){
-			for(var i = 0 ; i < 10;++i)
-				print("thread ["+id+"]: "+i);
-			throw "finish"
-		}
-		funa(id);
-	});
-};
-for(var i = 0 ; i < 5 ;++i)
-	fCreateNewThread(i);

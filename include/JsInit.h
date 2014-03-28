@@ -10,6 +10,7 @@
 *****************************************************************************/
 /*
 	内置的几种类型Class都不同
+		Global
 		Object
 		Function
 		Array
@@ -21,6 +22,7 @@
 		RegExp
 		Error
 		Activation[10.1.6]
+		*Thread(对象, 提供线程API)
 */
 void JsECMAScriptObjectInit(struct JsVm* vm);
 

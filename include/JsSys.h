@@ -33,6 +33,8 @@ JsThread JsStartThread(JsThreadFn fn,void* data);
 void JsCloseSelf();
 //终止非当前线程
 void JsCloseThread(JsThread thread);
+//sleep time = ms
+void JsSleep(long time);
 //马上退出
 void JsHalt();
 
