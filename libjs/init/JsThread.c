@@ -13,6 +13,8 @@
 #include<stdio.h>
 #include<string.h>
 
+#define JS_NEW_THREAD_OBJECT_FLOOR 1
+
 //新启动线程的时候, 传递的参数
 struct JsStartData{
 	struct JsContext* c;
@@ -20,6 +22,8 @@ struct JsStartData{
 };
 
 static void JsThreadObjectInit(struct JsObject* thread);
+//创建一个由于start函数构造处理来的对象
+static struct JsObject* JsCreateMockThread(JsThread t);
 
 static void JsStart(struct JsObject *self, struct JsObject *thisobj, 
 		int argc, struct JsValue **argv, struct JsValue *res);
@@ -29,6 +33,13 @@ static void JsStartTask(struct JsEngine* e,void* data);
 
 static void JsThreadSleep(struct JsObject *self, struct JsObject *thisobj, 
 		int argc, struct JsValue **argv, struct JsValue *res);
+
+static void JsThreadYield(struct JsObject *self, struct JsObject *thisobj, 
+		int argc, struct JsValue **argv, struct JsValue *res);
+		
+static void JsThreadJoin(struct JsObject *self, struct JsObject *thisobj, 
+		int argc, struct JsValue **argv, struct JsValue *res);
+		
 		
 void JsThreadInit(struct JsVm* vm){
 	
@@ -64,6 +75,36 @@ static void JsThreadObjectInit(struct JsObject* thread){
 	vProperty->u.object = function;
 	function->Call = &JsThreadSleep;
 	(*thread->Put)(thread,"sleep",vProperty,JS_OBJECT_ATTR_STRICT);
+	//添加yield函数
+	function  = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
+	vProperty = (struct JsValue*) JsMalloc(sizeof(struct JsValue));
+	vProperty->type = JS_OBJECT;
+	vProperty->u.object = function;
+	function->Call = &JsThreadYield;
+	(*thread->Put)(thread,"yield",vProperty,JS_OBJECT_ATTR_STRICT);
+}
+/*
+	特殊的Thread对象
+*/
+static struct JsObject* JsCreateMockThread(JsThread t){
+	struct JsValue* vProperty  = NULL;
+	struct JsObject* function = NULL;
+	
+	if(t == NULL)
+		JsThrowString("Create Thread Error");
+	struct JsObject* thread = JsAllocObject(JS_NEW_THREAD_OBJECT_FLOOR);
+	//构建了standard
+	JsCreateStandardObject(thread);
+	thread->Class = "MockThread";
+	thread->sb[JS_NEW_THREAD_OBJECT_FLOOR] = t;
+	//添加sleep函数
+	function  = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
+	vProperty = (struct JsValue*) JsMalloc(sizeof(struct JsValue));
+	vProperty->type = JS_OBJECT;
+	vProperty->u.object = function;
+	function->Call = &JsThreadJoin;
+	(*thread->Put)(thread,"join",vProperty,JS_OBJECT_ATTR_STRICT);
+	return thread;
 }
 /*
 	scope 为原先的Context的Scope
@@ -83,9 +124,9 @@ static void JsStart(struct JsObject *self, struct JsObject *thisobj,
 		c->thisObj = JsGetVm()->Global ;
 		p->c = c;
 		p->f = argv[0]->u.object;
-		JsStartThread(&JsStartWork,p);
-		res->type = JS_BOOLEAN;
-		res->u.number = TRUE;
+		JsThread thread = JsStartThread(&JsStartWork,p);
+		res->type = JS_OBJECT;
+		res->u.object = JsCreateMockThread(thread);
 	}else{
 		JsThrowString("TypeError");
 	}
@@ -120,4 +161,20 @@ static void JsThreadSleep(struct JsObject *self, struct JsObject *thisobj,
 	if(argc <= 0 || argv[0]->type != JS_NUMBER)
 		JsThrowString("Args Error");
 	JsSleep(argv[0]->u.number);
+}
+
+static void JsThreadYield(struct JsObject *self, struct JsObject *thisobj, 
+		int argc, struct JsValue **argv, struct JsValue *res){
+		
+	JsYield();
+		
+}
+
+static void JsThreadJoin(struct JsObject *self, struct JsObject *thisobj, 
+		int argc, struct JsValue **argv, struct JsValue *res){
+		
+	if(strcmp(thisobj->Class,"MockThread") == 0 ){
+		JsThread thread = (JsThread)thisobj->sb[JS_NEW_THREAD_OBJECT_FLOOR];
+		JsJoin(thread);
+	}
 }

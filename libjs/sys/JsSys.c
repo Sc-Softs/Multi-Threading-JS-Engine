@@ -18,7 +18,6 @@ pthread_mutex_t globalLock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutexattr_t* lock_attr = NULL;;
 static void JsInitLockAttr();
 
-
 void JsPrevInitSys(){
 	JsInitLockAttr();	
 }
@@ -82,6 +81,15 @@ void JsSleep(long time){
 	if(time < 0)
 		return;
 	usleep(time*1000);
+}
+void JsYield(){
+	sched_yield();
+}
+void JsJoin(JsThread thread){
+	void* status;
+	JsAssert(thread != NULL);
+	pthread_t* tid = (pthread_t*)thread;
+	pthread_join(*tid,&status); 
 }
 void JsHalt(){
 	exit(0);

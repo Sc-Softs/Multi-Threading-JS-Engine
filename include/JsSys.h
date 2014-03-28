@@ -35,6 +35,10 @@ void JsCloseSelf();
 void JsCloseThread(JsThread thread);
 //sleep time = ms
 void JsSleep(long time);
+//yield
+void JsYield();
+//thread join
+void JsJoin(JsThread thread);
 //马上退出
 void JsHalt();
 
