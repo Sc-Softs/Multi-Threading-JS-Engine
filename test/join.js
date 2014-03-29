@@ -2,9 +2,6 @@ var a = 0;
 synchronized function inc() {
   a++;
 }
-
- 
-
 function run(){
 	for (var i = 0; i < 5; i++) {
 		inc();
