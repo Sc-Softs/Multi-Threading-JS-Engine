@@ -102,14 +102,7 @@ void JsDispatch(struct JsContext* c,JsTaskFn task,void* data){
 		
 		JsLockup(e->lock);
 		//从pools中剔除exec指向的context
-		int size,i;
-		size = JsListSize(e->pools);
-		for(i = 0 ; i < size; ++i){
-			if(JsListGet(e->pools,i) == e->exec){
-				JsListRemove(e->pools,i);
-				break;
-			}
-		}
+		JsBurnContext(e,e->exec);
 		e->exec = NULL;
 		JsUnlock(e->lock);
 	}
@@ -121,6 +114,21 @@ void JsContext2Engine(struct JsEngine* e, struct JsContext* c){
 	JsLockup(e->lock);
 	JsListPush(e->pools,c);
 	JsUnlock(e->lock);
+}
+void JsBurnContext(struct JsEngine* e, struct JsContext* c){
+	JsAssert(e != NULL && c != NULL);
+	JsLockup(e->lock);
+	//从pools中剔除exec指向的context
+	int size,i;
+	size = JsListSize(e->pools);
+	for(i = 0 ; i < size; ++i){
+		if(JsListGet(e->pools,i) == c){
+			JsListRemove(e->pools,i);
+			break;
+		}
+	}
+	JsUnlock(e->lock);
+
 }
 void JsStopEngine(struct JsEngine* e){
 	

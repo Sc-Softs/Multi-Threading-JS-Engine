@@ -10,26 +10,18 @@
 #include"JsAst.h"
 #include"JsParser.h"
 #include"JsEval.h"
+#include"JsNIO.h"
 #include"JsECMAScript.h"
 #include<stdlib.h>
 #include<stdio.h>
 #include<string.h>
 #include<math.h>
 
-struct JsSetTimeoutData{
-	struct JsContext* c;
-	struct JsObject* f;
-	int t;
-};
-
 static	void JsGlobalEval(struct JsObject *self, struct JsObject *thisobj, int argc, struct JsValue **argv, struct JsValue *res);
 static	void JsIsNaN(struct JsObject *self, struct JsObject *thisobj, int argc, struct JsValue **argv, struct JsValue *res);
 
 static void JsSetTimeout(struct JsObject *self, struct JsObject *thisobj, int argc, struct JsValue **argv, struct JsValue *res);
 static void* JsSetTimeoutWork(void* data);
-static void JsSetTimeoutTask(struct JsEngine* e,void* data);
-
-
 
 /*vm的空间已经被声明好了, 在JsInit.c中*/
 void JsGlobalInit(struct JsVm* vm){
@@ -146,46 +138,19 @@ static	void JsGlobalEval(struct JsObject *self, struct JsObject *thisobj, int ar
 static void JsSetTimeout(struct JsObject *self, struct JsObject *thisobj, int argc,
 		struct JsValue **argv, struct JsValue *res){
 
-	struct JsContext* c = JsGetTlsContext();
-	if(c ==  NULL)
-		return;
-	
 	if(argc >= 2 && argv[0]->type == JS_OBJECT &&argv[0]->u.object != NULL && argv[0]->u.object->Call != NULL
 		&& argv[1]->type == JS_NUMBER &&argv[1]->u.number >=0 ){
-		struct JsSetTimeoutData* p =( struct JsSetTimeoutData* ) JsMalloc(sizeof(struct JsSetTimeoutData));
-		//配置新的context
-		struct JsContext* newContext = JsCreateContext(c->engine,c);
-		newContext->thisObj = JsGetVm()->Global;
-		p->c = newContext;
-		
-		p->f = argv[0]->u.object;
-		p->t = argv[1]->u.number;
-		JsStartThread(&JsSetTimeoutWork,p);
+		int* data = (int*)JsMalloc(sizeof(int));
+		*data = argv[1]->u.number;
+		JsNIO(&JsSetTimeoutWork,data,argv[0]->u.object,FALSE);
 	}else{
 		JsThrowString("TypeError");
 	}
 }
 //NIO work
 static void* JsSetTimeoutWork(void* data){
-	struct JsSetTimeoutData* p = (struct JsSetTimeoutData*)data;
-	JsAssert(p->c && p->f);
-	//配置本线程的context;
-	JsSetTlsContext( p->c);
-	//填充当前线程信息
-	p->c->thread = JsCurThread();
-	//nio 
-	JsSleep(p->t);
-	//finish -> add to Engine
-	JsDispatch(p->c,&JsSetTimeoutTask,p->f);
-	//清除thread信息
-	p->c->thread = NULL;
+	int* time  = (int*)data;
+	JsSleep(*time);
 	return NULL;
-}
-static void JsSetTimeoutTask(struct JsEngine* e,void* data){
-	struct JsValue res;
-	struct JsContext* c = JsGetTlsContext();
-	struct JsObject* p =(struct JsObject*)data;
-	
-	(*p->Call)(p,c->thisObj,0,NULL,&res);
 }
 

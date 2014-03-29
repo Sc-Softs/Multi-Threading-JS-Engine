@@ -50,7 +50,10 @@ void JsDispatch(struct JsContext* c,JsTaskFn task,void* data);
 	在创建Context需要关联新建的Context到它所属的Engine
 */
 void JsContext2Engine(struct JsEngine* e, struct JsContext* c);
-
+/*
+	删除Engine->pools中一个Context
+*/
+void JsBurnContext(struct JsEngine* e, struct JsContext* c);
 /*
 	不能由与该Engine相关线程关闭.
 	关闭所有于该Engine关联的线程, 通过Context->thread来完成,

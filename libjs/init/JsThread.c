@@ -7,6 +7,7 @@
 #include"JsSys.h"
 #include"JsDebug.h"
 #include"JsAst.h"
+#include"JsNIO.h"
 #include"JsECMAScript.h"
 #include"JsException.h"
 #include<stdlib.h>
@@ -15,21 +16,12 @@
 
 #define JS_NEW_THREAD_OBJECT_FLOOR 1
 
-//新启动线程的时候, 传递的参数
-struct JsStartData{
-	struct JsContext* c;
-	struct JsObject* f;
-};
-
 static void JsThreadObjectInit(struct JsObject* thread);
 //创建一个由于start函数构造处理来的对象
 static struct JsObject* JsCreateMockThread(JsThread t);
 
 static void JsStart(struct JsObject *self, struct JsObject *thisobj, 
 		int argc, struct JsValue **argv, struct JsValue *res);
-static void* JsStartWork(void* data);
-static void JsStartTask(struct JsEngine* e,void* data);
-
 
 static void JsThreadSleep(struct JsObject *self, struct JsObject *thisobj, 
 		int argc, struct JsValue **argv, struct JsValue *res);
@@ -112,48 +104,16 @@ static struct JsObject* JsCreateMockThread(JsThread t){
 */
 static void JsStart(struct JsObject *self, struct JsObject *thisobj, 
 		int argc, struct JsValue **argv, struct JsValue *res){
-	struct JsContext* c = JsGetTlsContext();
-	if( c != NULL && argc >=0 &&argv[0]->type == JS_OBJECT && 
+	if(argc >=0 &&argv[0]->type == JS_OBJECT && 
 		argv[0]->u.object != NULL && argv[0]->u.object->Call != NULL){
 		//pass test
-		struct JsStartData* p =( struct JsStartData* ) JsMalloc(sizeof(struct JsStartData));
-		//配置新开线程的context;
-		struct JsEngine* newEngine = JsCreateEngine();
-		c = JsCreateContext(newEngine,c);
-		//修改thisObj = Global
-		c->thisObj = JsGetVm()->Global ;
-		p->c = c;
-		p->f = argv[0]->u.object;
-		JsThread thread = JsStartThread(&JsStartWork,p);
+		JsThread thread = JsNIO(NULL,NULL,argv[0]->u.object,TRUE);
 		res->type = JS_OBJECT;
 		res->u.object = JsCreateMockThread(thread);
 	}else{
 		JsThrowString("TypeError");
 	}
 }
-
-//开启新线程
-static void* JsStartWork(void* data){
-	struct JsStartData* p = (struct JsStartData*)data;
-	//设置本线程的JsContext
-	JsSetTlsContext( p->c);
-	//填充当前线程信息
-	p->c->thread = JsCurThread();
-	//finish -> add to Engine
-	JsDispatch(p->c,&JsStartTask,p->f);
-	p->c->thread = NULL;
-	return NULL;
-}
-
-//被Dispatch 调用的task
-static void JsStartTask(struct JsEngine* e,void* data){
-	struct JsValue res;
-	struct JsContext* c = JsGetTlsContext();
-	struct JsObject* p =(struct JsObject*)data;
-	
-	(*p->Call)(p,c->thisObj,0,NULL,&res);
-}
-
 
 static void JsThreadSleep(struct JsObject *self, struct JsObject *thisobj, 
 		int argc, struct JsValue **argv, struct JsValue *res){
