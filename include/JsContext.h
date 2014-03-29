@@ -51,9 +51,6 @@ struct JsContext{
 		队列中, 在先开启线程的时候, 必须配置该属性, 否则会脱离管理
 	*/
 	JsThread 	thread;
-	//属性在Dispatch中被修改
-	JsTaskFn  	task; //dispathch记录的task
-	void* 		data; //给task的数据
 };
 /****************************************************************************
 									通用API

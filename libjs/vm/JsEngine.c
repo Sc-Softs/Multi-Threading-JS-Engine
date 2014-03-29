@@ -12,6 +12,12 @@
 #include<stdio.h>
 #include<string.h>
 
+//wait 队列的数据结构
+struct JsTaskComp{
+	struct JsContext* context;
+	JsTaskFn task;
+	void* data;
+};
 //当前线程的engine对象的key
 static JsTlsKey engineKey = NULL;
 static void JsInitEngineKey();
@@ -41,10 +47,10 @@ struct JsEngine* JsCreateEngine(){
 	return e;
 }
 
-void JsDispatch(struct JsContext* c,JsTaskFn task,void* data){
-
+void JsDispatch(struct JsContext* c,JsTaskFn task0,void* data){
+	struct JsTaskComp* task;
 //验证
-	JsAssert(c != NULL && task != NULL);
+	JsAssert(c != NULL && task0 != NULL);
 	
 	struct JsEngine* e = c->engine;
 	if(e == NULL || e->vm == NULL 
@@ -52,13 +58,15 @@ void JsDispatch(struct JsContext* c,JsTaskFn task,void* data){
 		return;
 //添加到wait队列中
 	JsLockup(e->lock);
-	//关联任务到上下文中
-	c->task = task;
-	c->data = data;
-	JsListPush(e->waits,c);
+	task = (struct JsTaskComp*) JsMalloc(sizeof(struct JsTaskComp));
+	task->context = c;
+	task->task = task0;
+	task->data = data;
+	
+	JsListPush(e->waits,task);
 	c->thread = NULL;
 	c = NULL;
-	
+	task = NULL;
 	JsUnlock(e->lock);
 //循环执行waits队列
 	while(TRUE){
@@ -69,8 +77,12 @@ void JsDispatch(struct JsContext* c,JsTaskFn task,void* data){
 			return;
 		}
 		//获得waits第一个Context, 并且删除它
-		e->exec = (struct JsContext*)JsListGet(e->waits,JS_LIST_FIRST);
-		JsListRemove(e->waits,JS_LIST_FIRST);
+		task = (struct JsTaskComp*)JsListGet(e->waits,JS_LIST_FIRST);
+		if(task !=NULL){
+			//存在task
+			e->exec = task->context ;
+			JsListRemove(e->waits,JS_LIST_FIRST);
+		}
 		if(e->exec == NULL){
 			//waits队列中不存在等待的context
 			JsUnlock(e->lock);
@@ -87,7 +99,7 @@ void JsDispatch(struct JsContext* c,JsTaskFn task,void* data){
 		JsSetTlsEngine(e);
 		JsSetTlsContext(e->exec);
 		JS_TRY(0){
-			(*e->exec->task)(e,e->exec->data);
+			(*task->task)(e,task->data);
 		}
 		struct JsValue* error = NULL;
 		JS_CATCH(error){

@@ -43,8 +43,6 @@ struct JsContext* JsCopyContext(struct JsContext* c){
 	context = (struct JsContext*)JsMalloc(sizeof(struct JsContext));
 	context->scope = JsCreateList();
 	context->stack = JsCreateList();
-	context->task = NULL;
-	context->data = NULL;
 	if(c == NULL){
 		context->engine = NULL;
 		JsListPush(context->scope,JsGetVm()->Global);

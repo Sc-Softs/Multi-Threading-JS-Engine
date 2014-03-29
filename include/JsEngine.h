@@ -22,7 +22,7 @@ struct JsEngine{
 	
 	/*临界资源 正在执行的JsContext*/
 	struct JsContext* exec;
-	/*struct JsContext  临界资源 等待Engine调度*/
+	/* [JsContext + TaskFn + data]  临界资源 等待Engine调度*/
 	JsList waits; 
 	/*struct JsContext 临界资源 和该Engine关联的JsContext*/
 	JsList pools;
