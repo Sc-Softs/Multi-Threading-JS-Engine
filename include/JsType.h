@@ -52,7 +52,11 @@ typedef void (*JsTaskFn)(struct JsEngine* e,void* data);
 	res		: [JS_UNDEFINED, JS_NULL, JS_BOOLEAN, JS_STRING,JS_NUMBER,JS_OBJECT,JS_REFERENCE,JS_COMPLETION]
 */
 typedef void (*JsSpecFunctionFn)(struct JsEngine* e,void* data,struct JsValue* res);
-
+/*
+	JsMalloc(size,fn) 时候使用.
+	垃圾回收时, 使用的Mark函数, rp 为指向该对象的内存.
+*/
+typedef void (*JsGcMarkFn)(void* rp);
 /*NaN 数据类型*/
 #define JS_VALUE_NUMBER_NAN 		((double)(0.0/0.0))
 
