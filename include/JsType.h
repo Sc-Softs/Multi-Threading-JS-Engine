@@ -53,10 +53,21 @@ typedef void (*JsTaskFn)(struct JsEngine* e,void* data);
 */
 typedef void (*JsSpecFunctionFn)(struct JsEngine* e,void* data,struct JsValue* res);
 /*
-	JsMalloc(size,fn) 时候使用.
+	JsGcMalloc(size,markFn,FreeFn) 时候使用.
 	垃圾回收时, 使用的Mark函数, rp 为指向该对象的内存.
 */
-typedef void (*JsGcMarkFn)(void* rp);
+typedef void (*JsGcMarkFn)(void* mp);
+/*
+	JsGcMalloc(size,markFn,FreeFn) 时候使用.
+	垃圾回收时,释放内存的时候, 析构动作(一般用于
+		释放非托管资源, 如锁, 真机内存空间)
+*/
+typedef void (*JsGcFreeFn)(void* mp);
+/*
+	调用TrapGc的时候, 检测到需要进行Gc, 则调用该函数, 完成等待Gc
+前需要完成的工作
+*/
+typedef void (*JsGcTrapFn)(void* data);
 /*NaN 数据类型*/
 #define JS_VALUE_NUMBER_NAN 		((double)(0.0/0.0))
 

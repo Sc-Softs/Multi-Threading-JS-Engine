@@ -37,7 +37,7 @@ struct JsEngine* JsCreateEngine(){
 	e->vm = vm;
 	JsEngine2Vm(e);
 	
-	e->state = JS_ENGINE_KERNEL;
+	e->state = JS_ENGINE_NEW;
 	
 	e->exec = NULL;
 	e->waits = JsCreateList();

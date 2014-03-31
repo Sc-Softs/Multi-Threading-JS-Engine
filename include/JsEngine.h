@@ -15,9 +15,11 @@ struct JsContext;
 struct JsEngine{
 	struct JsVm* vm;
 	enum{
+		JS_ENGINE_NEW, //新建Engine对象状态 
 		JS_ENGINE_RUNNING,//运行Source中
 		JS_ENGINE_STOPPED,//被关闭后, 不会再启动
-		JS_ENGINE_KERNEL
+		JS_ENGINE_IDLE,//空闲状态
+		JS_ENGINE_GC//Engine可以被GC的状态, 在内存到达警戒线的时候的状态
 	}state;
 	
 	/*临界资源 正在执行的JsContext*/
@@ -37,7 +39,7 @@ struct JsEngine{
 void JsPrevInitEngine();
 void JsPostInitEngine();
 /*
-	创建一个Engine, 初始化各个属性, state = JS_ENGINE_KERNEL
+	创建一个Engine, 初始化各个属性, state = JS_ENGINE_NEW
 */
 struct JsEngine* JsCreateEngine();
 /*
