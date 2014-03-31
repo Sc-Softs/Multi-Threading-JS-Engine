@@ -57,17 +57,11 @@ int JsGcRegistKey(void* key,const char* desc);
 void JsGcBurnKey(void* key);
 /*Gc扫描的时候, Root节点配置*/
 void JsGcMountRoot(void* mp,void* key);
-
 /*
-	每次Engine轮转新Task的时候, 调用该函数, 以查询是否进行Gc工作
-*/
-int JsAskGc();
-/*
-	挂起线程等待Gc结束:
-		调用TrapGc的时候, 检测到需要进行Gc, 则调用该函数, 完成等待Gc
+		调用TrapGc的时候, 检测是否需要进行Gc, 则调用该函数, 完成等待Gc
 	前需要完成的工作, fn = NULL , 则表示没有要做的, data 为传递给fn的数据
 */
-void JsTrapGc(JsGcTrapFn fn,void* data);
+void JsGcTrap(JsGcTrapFn fn,void* data);
 
 /****************************锁模块 API**********************************/
 /*锁 API*/
