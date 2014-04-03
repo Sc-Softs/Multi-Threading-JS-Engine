@@ -41,7 +41,7 @@ void JsThreadInit(struct JsVm* vm){
 	JsThreadObjectInit(thread);
 	
 	//添加到Global中
-	struct JsValue* v = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* v = JsCreateValue();
 	v->type = JS_OBJECT;
 	v->u.object = thread;
 	(*vm->Global->Put)(vm->Global,"Thread",v,JS_OBJECT_ATTR_STRICT);
@@ -55,21 +55,21 @@ static void JsThreadObjectInit(struct JsObject* thread){
 	struct JsObject* function = NULL;
 	//添加start函数
 	function  = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
-	vProperty = (struct JsValue*) JsMalloc(sizeof(struct JsValue));
+	vProperty = JsCreateValue();
 	vProperty->type = JS_OBJECT;
 	vProperty->u.object = function;
 	function->Call = &JsStart;
 	(*thread->Put)(thread,"start",vProperty,JS_OBJECT_ATTR_STRICT);
 	//添加sleep函数
 	function  = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
-	vProperty = (struct JsValue*) JsMalloc(sizeof(struct JsValue));
+	vProperty = JsCreateValue();
 	vProperty->type = JS_OBJECT;
 	vProperty->u.object = function;
 	function->Call = &JsThreadSleep;
 	(*thread->Put)(thread,"sleep",vProperty,JS_OBJECT_ATTR_STRICT);
 	//添加yield函数
 	function  = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
-	vProperty = (struct JsValue*) JsMalloc(sizeof(struct JsValue));
+	vProperty = JsCreateValue();
 	vProperty->type = JS_OBJECT;
 	vProperty->u.object = function;
 	function->Call = &JsThreadYield;
@@ -91,7 +91,7 @@ static struct JsObject* JsCreateMockThread(JsThread t){
 	thread->sb[JS_NEW_THREAD_OBJECT_FLOOR] = t;
 	//添加sleep函数
 	function  = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
-	vProperty = (struct JsValue*) JsMalloc(sizeof(struct JsValue));
+	vProperty = JsCreateValue();
 	vProperty->type = JS_OBJECT;
 	vProperty->u.object = function;
 	function->Call = &JsThreadJoin;

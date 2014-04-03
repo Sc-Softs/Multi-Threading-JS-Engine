@@ -22,6 +22,7 @@ static void JsLoadShareModule(struct JsVm* vm);
 //Vm初始化完成后, 再初始化的资源模块
 static void JsPostInitModules();
 
+static void JsGcMarkVm(void* mp, int ms);
 //------------------------------------------------
 //初始化一个新的Vm
 struct JsVm* JsCreateVm(int debug,int mSize, char** mPath,
@@ -30,7 +31,11 @@ struct JsVm* JsCreateVm(int debug,int mSize, char** mPath,
 		return g_JsVm;
 	//初始化优先于VM的模块
 	JsPrevInitModules();
-	g_JsVm = (struct JsVm*)JsMalloc(sizeof(struct JsVm));
+	g_JsVm = (struct JsVm*)JsGcMalloc(sizeof(struct JsVm),&JsGcMarkVm,NULL);
+	//挂载
+	JsGcRegistKey(g_JsVm,"VM");
+	JsGcMountRoot(g_JsVm,g_JsVm);
+	
 	g_JsVm->state = JS_VM_START;
 	g_JsVm->debug = debug;
 	g_JsVm->trace = traceFn;
@@ -84,4 +89,12 @@ static void JsPostInitModules(){
 	JsPostInitException();
 	JsPostInitEngine();
 	JsPostInitContext();
+}
+
+static void JsGcMarkVm(void* mp, int ms){
+	struct JsVm* vm = (struct JsVm*)mp;
+	JsGcMark(vm->engines);
+	JsGcMark(vm->Global);
+	JsGcMark(vm->mPath);
+	JsGcMark(vm->lock);
 }

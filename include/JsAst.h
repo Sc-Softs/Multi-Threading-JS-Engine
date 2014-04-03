@@ -112,21 +112,26 @@ struct JsAstNode {
         enum JsAstClassEnum astClass;
         struct JsLocation* location;     /* source location */
 };
- 
+struct JsAstNode* JsCreateAstNode(enum JsAstClassEnum type,struct JsLocation* l);
+
 struct JsAstLiteralNode {
 	struct JsAstNode node;
 	struct JsValue* value;
 };
+struct JsAstLiteralNode* JsCreateAstLiteralNode(enum JsAstClassEnum type,struct JsLocation* l);
 
 struct JsAstStringLiteralNode {
 	struct JsAstNode node;
 	char *string;
 };
+struct JsAstStringLiteralNode* JsCreateAstStringLiteralNode(enum JsAstClassEnum type,struct JsLocation* l);
 
 struct JsAstPrimaryExpressionIdentNode {
 	struct JsAstNode node;
 	char *string;
 };
+struct JsAstPrimaryExpressionIdentNode* JsCreateAstPrimaryExpressionIdentNode(enum JsAstClassEnum type,struct JsLocation* l);
+
 
 struct JsAstArrayLiteralNode {
 	struct JsAstNode node;
@@ -137,6 +142,8 @@ struct JsAstArrayLiteralNode {
 		struct JsAstArrayLiteralElement *next;
 	} *first;
 };
+struct JsAstArrayLiteralNode* JsCreateAstArrayLiteralNode(enum JsAstClassEnum type,struct JsLocation* l);
+struct JsAstArrayLiteralElement* JsCreateAstArrayLiteralElement();
 
 struct JsAstObjectLiteralNode {
 	struct JsAstNode node;
@@ -146,6 +153,8 @@ struct JsAstObjectLiteralNode {
 		char *name;
 	} *first;
 };
+struct JsAstObjectLiteralNode* JsCreateAstObjectLiteralNode(enum JsAstClassEnum type,struct JsLocation* l);
+struct JsAstObjectLiteralPair* JsCreateAstObjectLiteralPair();
 
 struct JsAstArgumentsNode {				/* declare for early use */
 	struct JsAstNode node;
@@ -155,23 +164,33 @@ struct JsAstArgumentsNode {				/* declare for early use */
 		struct JsAstArgumentsArg *next;
 	} *first;
 };
+struct JsAstArgumentsNode* JsCreateAstArgumentsNode(enum JsAstClassEnum type,struct JsLocation* l);
+struct JsAstArgumentsArg* JsCreateAstArgumentsArg();
 
 struct JsAstMemberExpressionNewNode {
 	struct JsAstNode node;
 	struct JsAstNode *mexp;
 	struct JsAstArgumentsNode *args;
 };
+struct JsAstMemberExpressionNewNode* JsCreateAstMemberExpressionNewNode(enum JsAstClassEnum type,struct JsLocation* l);
+
 
 struct JsAstMemberExpressionDotNode {
 	struct JsAstNode node;
 	struct JsAstNode *mexp;
 	char *name;
 };
+struct JsAstMemberExpressionDotNode* JsCreateAstMemberExpressionDotNode(enum JsAstClassEnum type,struct JsLocation* l);
+
+
 
 struct JsAstMemberExpressionBracketNode {
 	struct JsAstNode node;
 	struct JsAstNode *mexp, *name;
 };
+struct JsAstMemberExpressionBracketNode* JsCreateAstMemberExpressionBracketNode(enum JsAstClassEnum type,struct JsLocation* l);
+
+
 
 struct JsAstCallExpressionNode {
 	struct JsAstNode node;
@@ -179,69 +198,97 @@ struct JsAstCallExpressionNode {
 	struct JsAstArgumentsNode *args;
 };
 
+struct JsAstCallExpressionNode* JsCreateAstCallExpressionNode(enum JsAstClassEnum type,struct JsLocation* l);
+
+
 struct JsAstUnaryNode {
 	struct JsAstNode node;
 	struct JsAstNode *a;
 };
+struct JsAstUnaryNode* JsCreateAstUnaryNode(enum JsAstClassEnum type,struct JsLocation* l);
+
+
 
 struct JsAstBinaryNode {
 	struct JsAstNode node;
 	struct JsAstNode *a, *b;
 };
+struct JsAstBinaryNode* JsCreateAstBinaryNode(enum JsAstClassEnum type,struct JsLocation* l);
+
 
 struct JsAstConditionalExpressionNode {
 	struct JsAstNode node;
 	struct JsAstNode *a, *b, *c;
 };
+struct JsAstConditionalExpressionNode* JsCreateAstConditionalExpressionNode(enum JsAstClassEnum type,struct JsLocation* l);
+
 
 struct JsAstAssignmentExpressionNode {
 	struct JsAstNode node;
 	struct JsAstNode *lhs, *expr;
 };
+struct JsAstAssignmentExpressionNode* JsCreateAstAssignmentExpressionNode(enum JsAstClassEnum type,struct JsLocation* l);
+
 
 struct JsAstVariableDeclarationNode {
 	struct JsAstNode node;
 	char* var;
 	struct JsAstNode *init;
 };
+struct JsAstVariableDeclarationNode* JsCreateAstVariableDeclarationNode(enum JsAstClassEnum type,struct JsLocation* l);
+
 
 struct JsAstIfStatementNode {
 	struct JsAstNode node;
 	struct JsAstNode *cond, *btrue, *bfalse;
 };
+struct JsAstIfStatementNode* JsCreateAstIfStatementNode(enum JsAstClassEnum type,struct JsLocation* l);
+
 
 struct JsAstIterationStatementWhileNode {
 	struct JsAstNode  node;
 	unsigned int target;
 	struct JsAstNode *cond, *body;
 };
+struct JsAstIterationStatementWhileNode* JsCreateAstIterationStatementWhileNode(enum JsAstClassEnum type,struct JsLocation* l);
+
 
 struct JsAstIterationStatementForNode {
 	struct JsAstNode node;
 	unsigned int target;
 	struct JsAstNode *init, *cond, *incr, *body;
 };
+struct JsAstIterationStatementForNode* JsCreateAstIterationStatementForNode(enum JsAstClassEnum type,struct JsLocation* l);
+
 
 struct JsAstIterationStatementForinNode {
 	struct JsAstNode node;
 	unsigned int target;
 	struct JsAstNode *lhs, *list, *body;
 };
+struct JsAstIterationStatementForinNode* JsCreateAstIterationStatementForinNode(enum JsAstClassEnum type,struct JsLocation* l);
+
 
 struct JsAstContinueStatementNode {
 	struct JsAstNode node;
 	unsigned int target;
 };
+struct JsAstContinueStatementNode* JsCreateAstContinueStatementNode(enum JsAstClassEnum type,struct JsLocation* l);
+
 
 struct JsAstBreakStatementNode {
 	struct JsAstNode node;
 	unsigned int target;
 };
+struct JsAstBreakStatementNode* JsCreateAstBreakStatementNode(enum JsAstClassEnum type,struct JsLocation* l);
+
 
 struct JsAstReturnStatementNode {
 	struct JsAstNode node;
 	struct JsAstNode *expr;
 };
+struct JsAstReturnStatementNode* JsCreateAstReturnStatementNode(enum JsAstClassEnum type,struct JsLocation* l);
+
 
 struct JsAstSwitchStatementNode {
 	struct JsAstNode node;
@@ -253,17 +300,16 @@ struct JsAstSwitchStatementNode {
 		struct JsAstCaseList *next;
 	} *cases, *defcase;
 };
-
-struct JsAstLabelledStatementNode {
-	struct JsAstUnaryNode unary;
-	unsigned int target;
-};
+struct JsAstSwitchStatementNode* JsCreateAstSwitchStatementNode(enum JsAstClassEnum type,struct JsLocation* l);
+struct JsAstCaseList* JsCreateAstCaseList();
 
 struct JsAstTryStatementNode {
 	struct JsAstNode node;
 	struct JsAstNode *block, *bcatch, *bfinally;
 	char *ident;
 };
+struct JsAstTryStatementNode* JsCreateAstTryStatementNode(enum JsAstClassEnum type,struct JsLocation* l);
+
 
 struct JsAstFunctionNode {
 	struct JsAstNode node;
@@ -273,11 +319,15 @@ struct JsAstFunctionNode {
 	char* name;
 	struct JsAstNode* body; 
 };
+struct JsAstFunctionNode* JsCreateAstFunctionNode(enum JsAstClassEnum type,struct JsLocation* l);
+
 
 struct JsAstFunctionBodyNode {
 	struct JsAstUnaryNode u;
 	int is_program;
 };
+struct JsAstFunctionBodyNode* JsCreateAstFunctionBodyNode(enum JsAstClassEnum type,struct JsLocation* l);
+
 
 struct JsAstSourceElementsNode {
 	struct JsAstNode node;
@@ -286,6 +336,9 @@ struct JsAstSourceElementsNode {
 		struct JsAstSourceElement *next;
 	} *statements;
 };
+struct JsAstSourceElementsNode* JsCreateAstSourceElementsNode(enum JsAstClassEnum type,struct JsLocation* l);
+struct JsAstSourceElement* JsCreateAstSourceElement();
+
 struct JsAstSyncBlockStatementNode{
 	struct JsAstNode node;
 	enum{
@@ -295,4 +348,7 @@ struct JsAstSyncBlockStatementNode{
 	char* ident;
 	struct JsAstNode* a;
 };
+struct JsAstSyncBlockStatementNode* JsCreateAstSyncBlockStatementNode(enum JsAstClassEnum type,struct JsLocation* l);
+
+
 #endif

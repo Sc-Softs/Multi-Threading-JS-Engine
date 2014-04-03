@@ -36,7 +36,7 @@ void JsNumberInit(struct JsVm* vm){
 	
 	JsNumberFunctionInit(number,number_proto);
 	JsNumberProtoInit(number,number_proto);
-	struct JsValue* v = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* v = JsCreateValue();
 	v->type = JS_OBJECT;
 	v->u.object = number;
 	(*vm->Global->Put)(vm->Global,"Number",v,JS_OBJECT_ATTR_STRICT);
@@ -50,7 +50,7 @@ static struct JsObject* JsCreateNumberObject(struct JsObject* prototype,double n
 	b->Class = "Number";
 	
 	//初始化自己的Sb
-	double* p = (double*)JsMalloc(sizeof(double));
+	double* p = (double*)JsGcMalloc(sizeof(double),NULL,NULL);
 	*p = number;
 	b->sb[JS_NUMBER_FLOOR] = p;
 	return b;
@@ -61,12 +61,12 @@ static void JsNumberFunctionInit(struct JsObject* number,struct JsObject* number
 	number->Call = &JsNumberConstCall;
 	number->Construct = &JsNumberConstConstruct;
 	//prototype
-	struct JsValue* v = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* v = JsCreateValue();
 	v->type = JS_OBJECT;
 	v->u.object = number_proto;
 	(*number->Put)(number,"prototype",v,JS_OBJECT_ATTR_STRICT);
 	//NaN
-	v = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	v = JsCreateValue();
 	v->type = JS_NUMBER;
 	v->u.number = JS_VALUE_NUMBER_NAN;
 	(*number->Put)(number,"NaN",v,JS_OBJECT_ATTR_STRICT);
@@ -95,20 +95,20 @@ static	void JsNumberConstConstruct(struct JsObject *self, struct JsObject *thiso
 }
 static void JsNumberProtoInit(struct JsObject* number,struct JsObject* number_proto){
 	
-	struct JsValue* p = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* p = JsCreateValue();
 	//Number.prototype.constructor
-	p= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	p= JsCreateValue();
 	p->type = JS_OBJECT;
 	p->u.object = number;
 	(*number_proto->Put)(number_proto,"constructor",p,JS_OBJECT_ATTR_DONTENUM);
 	//toString
-	p= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	p= JsCreateValue();
 	p->type = JS_OBJECT;
 	p->u.object = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	p->u.object->Call = &JsNumberProtoToString;
 	(*number_proto->Put)(number_proto,"toString",p,JS_OBJECT_ATTR_DONTENUM);
 	//valueOf
-	p= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	p= JsCreateValue();
 	p->type = JS_OBJECT;
 	p->u.object = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	p->u.object->Call = &JsNumberProtoValueOf;

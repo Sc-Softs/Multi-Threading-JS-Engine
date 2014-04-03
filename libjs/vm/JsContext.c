@@ -14,6 +14,8 @@
 //当前线程的context对象的key
 static JsTlsKey key = NULL;
 static void JsInitContextTlsKey();
+static void JsGcMarkContext(void* mp, int ms);
+
 
 //模块初始化API
 void JsPrevInitContext(){
@@ -40,7 +42,7 @@ struct JsContext* JsCreateContext(struct JsEngine* e, struct JsContext* c){
 struct JsContext* JsCopyContext(struct JsContext* c){
 	struct JsContext* context;
 	
-	context = (struct JsContext*)JsMalloc(sizeof(struct JsContext));
+	context = (struct JsContext*)JsGcMalloc(sizeof(struct JsContext),&JsGcMarkContext,NULL);
 	context->scope = JsCreateList();
 	context->stack = JsCreateList();
 	if(c == NULL){
@@ -151,4 +153,17 @@ struct JsContext* JsGetTlsContext(){
 }
 static void JsInitContextTlsKey(){
 	key = JsCreateTlsKey(NULL);
+	//挂载为Root
+	JsGcRegistKey(key,"JsContextTlsKey");
+	JsGcMountRoot(key,key);
+}
+
+static void JsGcMarkContext(void* mp, int ms){
+	struct JsContext* c = (struct JsContext*)mp;
+	JsGcMark(c->engine);
+	JsGcMark(c->scope);
+	JsGcMark(c->stack);
+	JsGcMark(c->pc);
+	JsGcMark(c->thisObj);
+	JsGcMark(c->thread);
 }

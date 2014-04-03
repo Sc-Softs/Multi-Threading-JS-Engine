@@ -54,15 +54,19 @@ typedef void (*JsTaskFn)(struct JsEngine* e,void* data);
 typedef void (*JsSpecFunctionFn)(struct JsEngine* e,void* data,struct JsValue* res);
 /*
 	JsGcMalloc(size,markFn,FreeFn) 时候使用.
-	垃圾回收时, 使用的Mark函数, rp 为指向该对象的内存.
+	垃圾回收时, 使用的Mark函数,
+		mp 为指向该对象的内存
+		ms 为申请内存的大小
 */
-typedef void (*JsGcMarkFn)(void* mp);
+typedef void (*JsGcMarkFn)(void* mp,int ms);
 /*
 	JsGcMalloc(size,markFn,FreeFn) 时候使用.
 	垃圾回收时,释放内存的时候, 析构动作(一般用于
 		释放非托管资源, 如锁, 真机内存空间)
+		mp 为指向该对象的内存
+		ms 为申请内存的大小
 */
-typedef void (*JsGcFreeFn)(void* mp);
+typedef void (*JsGcFreeFn)(void* mp,int ms);
 /*
 	调用TrapGc的时候, 检测到需要进行Gc, 则调用该函数, 完成等待Gc
 前需要完成的工作

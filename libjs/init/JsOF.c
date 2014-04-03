@@ -55,6 +55,9 @@ static void JsFunctionProtoApplyCall(struct JsObject *obj, struct JsObject *this
 static void JsFunctionProtoCallCall(struct JsObject *obj, struct JsObject *thisobj,
 			int argc, struct JsValue **argv, struct JsValue *res);
 
+
+//给JsValue* 类型数组的Mark
+static void JsGcMarkJsValueArray(void* mp, int ms);
 /////////////////////////////////////////////////////////////////////////////
 void JsOFInit(struct JsVm* vm){
 	struct JsValue* vPrototype;
@@ -66,21 +69,21 @@ void JsOFInit(struct JsVm* vm){
 	struct JsObject* fun_proto = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	
 	//预先配置他们的prototype属性, 给CreateObject类型函数使用
-	vPrototype = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	vPrototype = JsCreateValue();
 	vPrototype->type = JS_OBJECT;
 	vPrototype->u.object = obj_proto;
 	(*obj->Put)(obj,"prototype",vPrototype,JS_OBJECT_ATTR_STRICT);
 	
-	vPrototype = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	vPrototype = JsCreateValue();
 	vPrototype->type = JS_OBJECT;
 	vPrototype->u.object = fun_proto;
 	(*fun->Put)(fun,"prototype",vPrototype,JS_OBJECT_ATTR_STRICT);	
 	
 	//向Global添加Object和Function
-	struct JsValue* vObject = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* vObject = JsCreateValue();
 	vObject->type = JS_OBJECT;
 	vObject->u.object = obj;
-	struct JsValue* vFunction = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* vFunction = JsCreateValue();
 	vFunction->type = JS_OBJECT;
 	vFunction->u.object = fun;
 	(*vm->Global->Put)(vm->Global,"Object",vObject,JS_OBJECT_ATTR_STRICT);
@@ -104,7 +107,7 @@ static void JsObjectInit(struct JsObject* obj,struct JsObject* obj_proto,
 	
 	//Object->Prototype = Function.Prototype;
 	obj->Prototype = fun_proto;
-	struct JsValue* vLength = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* vLength = JsCreateValue();
 	vLength->type = JS_NUMBER;
 	vLength->u.number = 1;
 	(*obj->Put)(obj,"length",vLength,JS_OBJECT_ATTR_STRICT);
@@ -114,36 +117,36 @@ static void JsObjectProtoInit(struct JsObject* obj,struct JsObject* obj_proto,
 		struct JsObject* fun,struct JsObject* fun_proto){
 	struct JsValue* vProperty ;
 	//constructor
-	vProperty= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	vProperty= JsCreateValue();
 	vProperty->type = JS_OBJECT;
 	vProperty->u.object = obj;
 	(*obj_proto->Put)(obj_proto,"constructor",vProperty,JS_OBJECT_ATTR_DONTENUM);
 	//toString
-	vProperty= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	vProperty= JsCreateValue();
 	vProperty->type = JS_OBJECT;
 	vProperty->u.object = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	vProperty->u.object->Call = &JsObjectProtoToStringCall;
 	(*obj_proto->Put)(obj_proto,"toString",vProperty,JS_OBJECT_ATTR_DONTENUM);
 	//valueOf
-	vProperty= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	vProperty= JsCreateValue();
 	vProperty->type = JS_OBJECT;
 	vProperty->u.object = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	vProperty->u.object->Call = &JsObjectProtoValueOfCall;
 	(*obj_proto->Put)(obj_proto,"valueOf",vProperty,JS_OBJECT_ATTR_DONTENUM);
 	//hasOwnProperty
-	vProperty= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	vProperty= JsCreateValue();
 	vProperty->type = JS_OBJECT;
 	vProperty->u.object = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	vProperty->u.object->Call = &JsObjectProtoHasOwnPropertyCall;
 	(*obj_proto->Put)(obj_proto,"hasOwnProperty",vProperty,JS_OBJECT_ATTR_DONTENUM);
 	//isPrototypeOf
-	vProperty= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	vProperty= JsCreateValue();
 	vProperty->type = JS_OBJECT;
 	vProperty->u.object = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	vProperty->u.object->Call = &JsObjectProtoIsPrototypeOfCall;
 	(*obj_proto->Put)(obj_proto,"isPrototypeOf",vProperty,JS_OBJECT_ATTR_DONTENUM);
 	//propertyIsEnumerable
-	vProperty= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	vProperty= JsCreateValue();
 	vProperty->type = JS_OBJECT;
 	vProperty->u.object = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	vProperty->u.object->Call = &JsObjectProtoPropertyIsEnumerableCall;
@@ -175,7 +178,7 @@ static void JsObjectProtoToStringCall(struct JsObject *obj, struct JsObject *thi
 			int argc, struct JsValue **argv, struct JsValue *res){
 	const char* Class = thisobj->Class;
 	int size = strlen(Class);
-	char* buf =(char*)JsMalloc(size+12);
+	char* buf =(char*)JsGcMalloc(size+12,NULL,NULL);
 	sprintf(buf,"[object %s]",Class);
 	res->type = JS_STRING;
 	res->u.string = buf;
@@ -263,7 +266,7 @@ static void JsFunctionInit(struct JsObject* obj,struct JsObject* obj_proto,
 		struct JsObject* fun,struct JsObject* fun_proto){
 	//Call 和 Constructor 没有写
 	fun->Prototype = fun_proto;
-	struct JsValue* vLength = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* vLength = JsCreateValue();
 	vLength->type = JS_NUMBER;
 	vLength->u.number = 0; //default 1
 	(*fun->Put)(fun,"length",vLength,JS_OBJECT_ATTR_STRICT);
@@ -274,24 +277,24 @@ static void JsFunctionProtoInit(struct JsObject* obj,struct JsObject* obj_proto,
 	fun_proto->Prototype = obj_proto;	
 	fun_proto->Call = &JsFunctionProtoCall;
 	//constructor
-	vProperty= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	vProperty= JsCreateValue();
 	vProperty->type = JS_OBJECT;
 	vProperty->u.object = fun;
 	(*fun_proto->Put)(fun_proto,"constructor",vProperty,JS_OBJECT_ATTR_DONTENUM);
 	//toString
-	vProperty= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	vProperty= JsCreateValue();
 	vProperty->type = JS_OBJECT;
 	vProperty->u.object = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	vProperty->u.object->Call = &JsFunctionProtoToStringCall;
 	(*fun_proto->Put)(fun_proto,"toString",vProperty,JS_OBJECT_ATTR_DONTENUM);
 	//apply
-	vProperty= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	vProperty= JsCreateValue();
 	vProperty->type = JS_OBJECT;
 	vProperty->u.object = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	vProperty->u.object->Call = &JsFunctionProtoApplyCall;
 	(*fun_proto->Put)(fun_proto,"apply",vProperty,JS_OBJECT_ATTR_DONTENUM);
 	//call
-	vProperty= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	vProperty= JsCreateValue();
 	vProperty->type = JS_OBJECT;
 	vProperty->u.object = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	vProperty->u.object->Call = &JsFunctionProtoCallCall;
@@ -318,9 +321,9 @@ static void JsFunctionProtoToStringCall(struct JsObject *obj, struct JsObject *t
 /*15.3.4.3*/
 static void JsFunctionProtoApplyCall(struct JsObject *obj, struct JsObject *thisobj,
 			int argc, struct JsValue **argv, struct JsValue *res){
-	struct JsObject* this0;
-	int argc0;
-	struct JsValue** argv0;
+	struct JsObject* this0 =NULL;
+	int argc0 = 0;
+	struct JsValue** argv0 = NULL;
 	if(thisobj == NULL){
 		JsThrowString("null point this");
 		return;
@@ -369,7 +372,7 @@ static void JsFunctionProtoApplyCall(struct JsObject *obj, struct JsObject *this
 				return;
 			}
 			argc0 = v.u.number;
-			argv0 = (struct JsValue**)JsMalloc(sizeof(struct JsValue*)* argc0);
+			argv0 = (struct JsValue**)JsGcMalloc(sizeof(struct JsValue*)* argc0,&JsGcMarkJsValueArray,NULL);
 			//计算最大位数
 			int number = argc0;
 			int size = 0;
@@ -378,12 +381,12 @@ static void JsFunctionProtoApplyCall(struct JsObject *obj, struct JsObject *this
 				number /=10;
 				size++;
 			}
-			char* buf = (char*)JsMalloc(size + 4);
+			char* buf = (char*)JsGcMalloc(size + 4,NULL,NULL);
 			//组建Argv0
 			for(i =0 ; i < argc0;++i){
 				sprintf(buf,"%d",i);
 				(*argv[1]->u.object->Get)(argv[1]->u.object,buf,NULL,&v);
-				argv0[i] =  (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+				argv0[i] =  JsCreateValue();
 				*argv0[i] = v;
 			}
 		}
@@ -397,9 +400,9 @@ static void JsFunctionProtoApplyCall(struct JsObject *obj, struct JsObject *this
 /*15.3.4.4*/
 static void JsFunctionProtoCallCall(struct JsObject *obj, struct JsObject *thisobj,
 			int argc, struct JsValue **argv, struct JsValue *res){
-	struct JsObject* this0;
-	int argc0;
-	struct JsValue** argv0;
+	struct JsObject* this0 = NULL;
+	int argc0 = 0;
+	struct JsValue** argv0 = NULL;
 	if(thisobj == NULL){
 		JsThrowString("null point this");
 		return;
@@ -438,4 +441,15 @@ static void JsFunctionProtoCallCall(struct JsObject *obj, struct JsObject *thiso
 		JsAssert(FALSE);
 	}
 	(*thisobj->Call)(thisobj,this0,argc0,argv0,res);	
+}
+
+
+//给JsValue* 类型数组的Mark
+static void JsGcMarkJsValueArray(void* mp, int ms){
+	struct JsValue** array = (struct JsValue**)mp;
+	int size = (ms/sizeof(void*));
+	int i;
+	for(i=0;i<size;++i)
+		JsGcMark(array[i]);
+
 }

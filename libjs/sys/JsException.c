@@ -23,6 +23,8 @@ struct JsException{
 static JsTlsKey eKey = NULL;
 static void JsTlsClose(void *data);
 static void JsInitTlsKey();
+
+static void JsGcMarkException(void* mp,int ms);
 //------------------------------------------------------------------
 void JsPrevInitException(){
 	JsInitTlsKey();
@@ -37,7 +39,11 @@ void JsBuildDefender(void* jmp_buf_p){
 	struct JsException* p  = (struct JsException*)JsGetTlsValue(eKey);
 	if( p == NULL){
 		//TLS中没有对应的Exception对象
-		p = (struct JsException* )JsMalloc(sizeof(struct JsException));
+		p = (struct JsException* )JsGcMalloc(sizeof(struct JsException),&JsGcMarkException,NULL);
+		//挂在为ROOT
+		JsGcRegistKey(p,"ExceptionTlsKey");
+		JsGcMountRoot(p,p);
+		
 		p->defenders = JsCreateList();
 		p->stack = JsCreateList();
 		p->err = NULL;
@@ -58,7 +64,7 @@ void JsOmitDefender(){
 
 
 void JsThrowString(char* msg){
-	struct JsValue* e =(struct JsValue*) JsMalloc(sizeof(struct JsValue));
+	struct JsValue* e = JsCreateValue();
 	e->type = JS_STRING;
 	if(msg == NULL)
 		msg = "EMPTY MSG";
@@ -136,11 +142,25 @@ JsList JsGetExceptionStack(){
 
 static void JsInitTlsKey(){
 	eKey = JsCreateTlsKey(JsTlsClose);
+	//挂在为Root
+	JsGcRegistKey(eKey,"StaticTlsExceptionKey");
+	JsGcMountRoot(eKey,eKey);
 }
 static void JsTlsClose(void *data){
+	if(data == NULL)
+		return;	
 	struct JsException* p = data;
+	//销毁该Exception的挂载
+	JsGcBurnKey(p);
 	if( p != NULL){
 		p->defenders = NULL;
 		p->err = NULL;
 	}
+}
+
+static void JsGcMarkException(void* mp,int ms){
+	struct JsException* e = (struct JsException*)mp;
+	JsGcMark(e->defenders);
+	JsGcMark(e->stack);
+	JsGcMark(e->err);
 }

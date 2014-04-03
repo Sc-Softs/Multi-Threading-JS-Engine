@@ -50,7 +50,7 @@ void JsArrayInit(struct JsVm* vm){
 	JsArrayFunctionInit(array,array_proto);
 	JsArrayProtoInit(array,array_proto);
 	//向Global添加Array
-	struct JsValue* v = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* v = JsCreateValue();
 	v->type = JS_OBJECT;
 	v->u.object = array;
 	(*vm->Global->Put)(vm->Global,"Array",v,JS_OBJECT_ATTR_STRICT);
@@ -65,7 +65,7 @@ static struct JsObject* JsCreateArray(struct JsObject* prototype, int length, st
 	struct JsObject* array = JsCreateStandardObject(NULL);
 	if(prototype != NULL)
 		array->Prototype = prototype;
-	struct JsValue* vLength = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* vLength = JsCreateValue();
 	vLength->type = JS_NUMBER;
 	vLength->u.number = length;
 	array->Class = "Array";
@@ -80,7 +80,7 @@ static struct JsObject* JsCreateArray(struct JsObject* prototype, int length, st
 			number /=10;
 			bit++;
 		}
-		char* buf = (char*)JsMalloc(bit+4);
+		char* buf = (char*)JsGcMalloc(bit+4,NULL,NULL);
 		sprintf(buf,"%d",i);
 		(*array->Put)(array,buf,argv[i],JS_OBJECT_ATTR_DEFAULT);
 	}
@@ -93,7 +93,7 @@ static void JsArrayFunctionInit(struct JsObject* array,struct JsObject* array_pr
 	array->Call = &JsArrayConstCall;
 	array->Construct = &JsArrayConstCall;
 	//Array.prototype
-	struct JsValue* vPrototype = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* vPrototype = JsCreateValue();
 	vPrototype->type = JS_OBJECT;
 	vPrototype->u.object = array_proto;
 	(*array->Put)(array,"prototype",vPrototype,JS_OBJECT_ATTR_STRICT);
@@ -102,34 +102,34 @@ static void JsArrayProtoInit(struct JsObject* array,struct JsObject* array_proto
 	
 	struct JsValue* p;
 	//Array.prototype.constructor
-	p= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	p= JsCreateValue();
 	p->type = JS_OBJECT;
 	p->u.object = array;
 	(*array_proto->Put)(array_proto,"constructor",p,JS_OBJECT_ATTR_DONTENUM);
 	
 	//Array.prototype.toString
-	p= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	p= JsCreateValue();
 	p->type = JS_OBJECT;
 	p->u.object = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	p->u.object->Call = &JsArrayProtoToString;
 	(*array_proto->Put)(array_proto,"toString",p,JS_OBJECT_ATTR_DONTENUM);
 	
 	//Array.prototype.join
-	p= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	p= JsCreateValue();
 	p->type = JS_OBJECT;
 	p->u.object = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	p->u.object->Call = &JsArrayProtoJoin;
 	(*array_proto->Put)(array_proto,"join",p,JS_OBJECT_ATTR_DONTENUM);
 	
 	//Array.prototype.pop
-	p= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	p= JsCreateValue();
 	p->type = JS_OBJECT;
 	p->u.object = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	p->u.object->Call = &JsArrayProtoPop;
 	(*array_proto->Put)(array_proto,"pop",p,JS_OBJECT_ATTR_DONTENUM);
 	
 	//Array.prototype.push
-	p= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	p= JsCreateValue();
 	p->type = JS_OBJECT;
 	p->u.object = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	p->u.object->Call = &JsArrayProtoPush;
@@ -208,7 +208,7 @@ static void JsArrayProtoJoin(struct JsObject *self, struct JsObject *thisobj,
 	}
 	r.type = JS_STRING;
 	int sizeOfMem = strlen(s.u.string)+sepLength+4;
-	r.u.string = (char*)JsMalloc(sizeOfMem);
+	r.u.string = (char*)JsGcMalloc(sizeOfMem,NULL,NULL);
 	strcpy(r.u.string,s.u.string);
 	int k = 1;
 r10:
@@ -222,7 +222,7 @@ r10:
 		number /= 10;
 		bit ++;
 	}
-	char* cur = (char*)JsMalloc(bit+4);
+	char* cur = (char*)JsGcMalloc(bit+4,NULL,NULL);
 	sprintf(cur,"%d",k);
 	(*thisobj->Get)(thisobj,cur,NULL,&v);
 	if(v.type == JS_UNDEFINED|| v.type == JS_NULL){
@@ -230,7 +230,7 @@ r10:
 	}else{
 		JsToString(&v,&s);
 		sizeOfMem = sizeOfMem + sepLength  + strlen(s.u.string);
-		r.u.string = (char*)JsReAlloc(r.u.string,sizeOfMem);
+		r.u.string = (char*)JsGcReAlloc(r.u.string,sizeOfMem);
 		strcat(r.u.string,sep);
 		strcat(r.u.string,s.u.string);
 	}
@@ -250,11 +250,11 @@ static void JsArrayProtoPop(struct JsObject *self, struct JsObject *thisobj,
 			number /= 10;
 			bit++;
 		}
-		char* buf = (char*)JsMalloc(bit+4);
+		char* buf = (char*)JsGcMalloc(bit+4,NULL,NULL);
 		sprintf(buf,"%d",(int)(vLength.u.number - 1));
 		(*thisobj->Get)(thisobj,buf,NULL,res);
 		(*thisobj->Delete)(thisobj,buf,&v);
-		struct JsValue* l = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+		struct JsValue* l = JsCreateValue();
 		l->type = JS_NUMBER;
 		l->u.number = vLength.u.number - 1;
 		(*thisobj->Put)(thisobj,"length",l,JS_OBJECT_ATTR_DONTENUM | JS_OBJECT_ATTR_DONTDELETE);
@@ -284,11 +284,11 @@ static void JsArrayProtoPush(struct JsObject *self, struct JsObject *thisobj,
 			number /= 10;
 			bit++;
 		}
-		char* buf = (char*)JsMalloc(bit + 4);
+		char* buf = (char*)JsGcMalloc(bit + 4,NULL,NULL);
 		sprintf(buf,"%d",i);
 		(*thisobj->Put)(thisobj,buf,argv[i - begin],JS_OBJECT_ATTR_DEFAULT);
 	}
-	struct JsValue* l = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* l = JsCreateValue();
 	l->type = JS_NUMBER;
 	l->u.number = begin + argc;
 	(*thisobj->Put)(thisobj,"length",l,JS_OBJECT_ATTR_DONTENUM | JS_OBJECT_ATTR_DONTDELETE);
@@ -312,7 +312,7 @@ static void JsArrayInstPut(struct JsObject *self,char *prop, struct JsValue *val
 					number /=10;
 					bit++;
 				}
-				char* buf = (char*)JsMalloc(bit+4);
+				char* buf = (char*)JsGcMalloc(bit+4,NULL,NULL);
 				sprintf(buf,"%d",i);
 				//删除不在新范围内的数组元素
 				(*self->Delete)(self,buf,&v0);
@@ -330,7 +330,7 @@ static void JsArrayInstPut(struct JsObject *self,char *prop, struct JsValue *val
 				JsThrowString("RangeError");
 			if(index >= v.u.number){
 				//如果大于length, 则需要重新写入length
-				struct JsValue* l = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+				struct JsValue* l = JsCreateValue();
 				l->type = JS_NUMBER;
 				l->u.number = index + 1;
 				//修改length

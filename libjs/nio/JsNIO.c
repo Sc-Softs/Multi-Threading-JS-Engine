@@ -22,6 +22,7 @@ struct JsNIOData{
 
 static void* JsNIOWork(void* data);
 static void JsNIOTask(struct JsEngine* e,void* data);
+static void JsGcMarkNIOData(void* mp,int ms);
 /*
 	work 		: 开启线程后, NIO工作
 	data 		: 传递给work的数据包
@@ -46,7 +47,12 @@ JsThread JsNIO(JsThreadFn work,void* data, struct JsObject* o, int openEngine){
 	//统一为Global对象
 	c->thisObj = JsGetVm()->Global;
 	//配置传递数据
-	struct JsNIOData* p =( struct JsNIOData* ) JsMalloc(sizeof(struct JsNIOData));
+	struct JsNIOData* p =( struct JsNIOData* ) JsGcMalloc(sizeof(struct JsNIOData),&JsGcMarkNIOData,NULL);
+	//配置为关联数据, 和新Context关联
+	JsGcRegistKey(c,"NIO Context");
+	JsGcMountRoot(p,c);
+	
+	
 	p->work = work;
 	p->data = data;
 	p->context = c;
@@ -92,4 +98,11 @@ static void JsNIOTask(struct JsEngine* e,void* data){
 	struct JsObject* p =(struct JsObject*)data;
 	
 	(*p->Call)(p,c->thisObj,0,NULL,&res);
+}
+
+static void JsGcMarkNIOData(void* mp,int ms){
+	struct JsNIOData* nio = (struct JsNIOData*)mp;
+	JsGcMark(nio->data);
+	JsGcMark(nio->context);
+	JsGcMark(nio->function);
 }

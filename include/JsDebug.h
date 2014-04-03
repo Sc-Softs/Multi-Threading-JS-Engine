@@ -20,6 +20,7 @@ struct JsLocation{
 /****************************************************************************
 									通用API
 *****************************************************************************/
+struct JsLocation* JsCreateLocation(char* filename,int lineno);
 //Print函数组
 void JsPrintString(char* fmt,...);
 void JsPrintValue(struct JsValue* v);

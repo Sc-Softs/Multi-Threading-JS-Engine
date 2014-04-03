@@ -37,22 +37,22 @@ struct JsParser{
 					// 且在SKIP的时候消除原先标记;
 	
 };
+
 //参数辅助结构
 struct var {
 	char *name;
 	struct var *next;		/* linked list of vars */
 };
-
 //-----------------------辅助函数---------------------------------------
-	
-static struct JsAstNode *new_node(struct JsParser *parser, int sz, 
-        enum JsAstClassEnum nc, const char *dbg_nc);
+
 //超前查第2个单词
 static int lookahead2();
 //返回查看过程中是否发现换行
 static void yylex0(YYSTYPE* v,int* t,int* has, yyscan_t lexer);
 
-
+static void JsGcMarkArray(void* mp, int ms);
+static void JsGcMarkVar(void* mp,int ms);
+static void JsGcMarkParser(void* mp, int ms);
 //-----------LL分析------------------------------------------------------
 static struct JsAstNode *Literal_parse(struct JsParser *parser);
 static struct JsAstNode *NumericLiteral_parse(struct JsParser *parser);
@@ -221,33 +221,17 @@ static struct JsAstNode *SyncBlockStatement_parse(struct JsParser *parser);
 			EXPECTX(';', "';', '}' or newline");	\
     } while (0)
 
+#define NEW_NODE_HELP(construct,nc)	\
+	construct(nc,JsCreateLocation(parser->filename,yyget_lineno(parser->lexer)))
 	
-#define NEW_NODE(t, nc)					\
-	((t *)new_node(parser, sizeof (t), nc, #nc))
+#define NEW_NODE(construct, nc)								\
+	(parser->debug >= JS_PARSER_DEBUG_NEW && #nc != NULL ?	\
+		(printf("Parse: NEW_NODE %s (next=%s) \n", 		\
+			#nc , JsTokenName(NEXT)),NEW_NODE_HELP(construct,nc)):(NEW_NODE_HELP(construct,nc))) \
+
 	
 //---------------------------------------------------------------------
 
-static struct JsAstNode *
-new_node(parser, sz, nc,dbg_nc)
-	struct JsParser *parser;
-	int sz;
-	enum JsAstClassEnum nc;
-	const char *dbg_nc;
-{
-	struct JsAstNode *n;
-
-	n = (struct JsAstNode *)JsMalloc(sz);
-	n->astClass = nc;
-	n->location = (struct JsLocation*) JsMalloc(sizeof(struct JsLocation));
-	n->location->filename = parser->filename;
-	//可能出现获得lookahead的lineno
-	n->location->lineno =  yyget_lineno(parser->lexer);
-	if(parser->debug >= JS_PARSER_DEBUG_NEW && dbg_nc != NULL){
-		printf("Parse: NEW_NODE %p %s (next=%s)\n", 
-			n, dbg_nc, JsTokenName(NEXT));
-	}
-	return n;
-}
 static int lookahead2(struct JsParser* parser){
 	//只有在lookahead(0)不是文件结尾 并且缓存为空的时候，才加载下一个单词
 	if(parser->token == tEND){
@@ -277,6 +261,29 @@ static void yylex0(YYSTYPE* v,int* t,int* has, yyscan_t lexer){
 	*t = token;
 	*has = hasLineToken;
 	return;
+}
+static void JsGcMarkArray(void* mp, int ms){
+	void** array = (void**)mp;
+	int size = ms/sizeof(void*);
+	int i;
+	for(i=0;i<size;++i)
+		JsGcMark(array[i]);
+
+}
+static void JsGcMarkVar(void* mp,int ms){
+	struct var* p = (struct var*)mp;
+	JsGcMark(p->name);
+	JsGcMark(p->next);
+}
+static void JsGcMarkParser(void* mp, int ms){
+	struct JsParser* p = (struct JsParser*)mp;
+	JsGcMark(p->lexer);
+	JsGcMark(p->filename);
+	if(p->token == tIDENT || p->token == tSTRING)
+		JsGcMark(p->value.string);
+	if(p->token2 == tIDENT || p->token2 == tSTRING)
+		JsGcMark(p->value2.string);
+	
 }
 //---------------------------------------------------------------------
 
@@ -326,7 +333,7 @@ SourceElements_parse(parser)
 	struct JsAstSourceElementsNode *se;
 	struct JsAstSourceElement **s;
 
-	se = NEW_NODE(struct JsAstSourceElementsNode, NODECLASS_SourceElements); 
+	se = NEW_NODE(JsCreateAstSourceElementsNode, NODECLASS_SourceElements); 
 	s = &se->statements;
 
 	for (;;){ 
@@ -342,7 +349,7 @@ SourceElements_parse(parser)
 	    case tCONTINUE: case tBREAK: case tRETURN:
 	    case tWITH: case tSWITCH: case tTHROW: case tTRY:
 	    case tDIV: case tDIVEQ: case tSYNCHRONIZED: /* in lieu of tREGEX */
-			*s = (struct JsAstSourceElement*)JsMalloc(sizeof(struct JsAstSourceElement));
+			*s = JsCreateAstSourceElement();
 			PARSE(Statement,(*s)->node);
 			s = &(*s)->next;
 			if (parser->debug >= JS_PARSER_DEBUG_NEW)
@@ -445,7 +452,7 @@ Statement_parse(parser)
 static struct JsAstNode *SyncBlockStatement_parse(struct JsParser *parser){
 
 	struct JsAstSyncBlockStatementNode *n = NULL;
-	n = NEW_NODE(struct JsAstSyncBlockStatementNode, NODECLASS_SyncBlockStatement);
+	n = NEW_NODE(JsCreateAstSyncBlockStatementNode, NODECLASS_SyncBlockStatement);
 	EXPECT(tSYNCHRONIZED);
 	if(NEXT == '('){
 		//Block
@@ -486,7 +493,7 @@ Block_parse(parser)
 
 	EXPECT('{');
 	if (NEXT == '}')
-		n = NEW_NODE(struct JsAstNode, NODECLASS_Block_empty);
+		n = NEW_NODE(JsCreateAstNode, NODECLASS_Block_empty);
 	else
 		PARSE(StatementList,n);
 	EXPECT('}');
@@ -514,7 +521,7 @@ StatementList_parse(parser)
 	case tDEFAULT:
 		return n;
 	}
-	ln = NEW_NODE(struct JsAstBinaryNode, NODECLASS_StatementList);
+	ln = NEW_NODE(JsCreateAstBinaryNode, NODECLASS_StatementList);
 	ln->a = n;
 	PARSE(StatementList,ln->b);
 	return (struct JsAstNode *)ln;
@@ -561,7 +568,7 @@ VariableStatement_parse(parser)
 {
 	struct JsAstUnaryNode *n;
 
-	n = NEW_NODE(struct JsAstUnaryNode, NODECLASS_VariableStatement);
+	n = NEW_NODE(JsCreateAstUnaryNode, NODECLASS_VariableStatement);
 	EXPECT(tVAR);
 	PARSE(VariableDeclarationList,n->a);
 	EXPECT_SEMICOLON;
@@ -578,7 +585,7 @@ VariableDeclarationList_parse(parser)
 	PARSE(VariableDeclaration,n);
 	if (NEXT != ',') 
 		return n;
-	ln = NEW_NODE(struct JsAstBinaryNode, NODECLASS_VariableDeclarationList);
+	ln = NEW_NODE(JsCreateAstBinaryNode, NODECLASS_VariableDeclarationList);
 	SKIP;
 	/* NB: IterationStatement_parse() also constructs a VarDeclList */
 	ln->a = n;
@@ -592,7 +599,7 @@ VariableDeclaration_parse(parser)
 {
 	struct JsAstVariableDeclarationNode *v;
 
-	v = NEW_NODE(struct JsAstVariableDeclarationNode, 
+	v = NEW_NODE(JsCreateAstVariableDeclarationNode, 
 		NODECLASS_VariableDeclaration);
 	if (NEXT == tIDENT)
 		v->var = NEXT_VALUE->string;
@@ -619,7 +626,7 @@ EmptyStatement_parse(parser)
 {
 	struct JsAstNode *n;
 
-	n = NEW_NODE(struct JsAstNode, NODECLASS_EmptyStatement);
+	n = NEW_NODE(JsCreateAstNode, NODECLASS_EmptyStatement);
 	EXPECT_SEMICOLON;
 	return n;
 }
@@ -638,7 +645,7 @@ ExpressionStatement_parse(parser)
 {
     struct JsAstUnaryNode *n;
 
-	n = NEW_NODE(struct JsAstUnaryNode, NODECLASS_ExpressionStatement);
+	n = NEW_NODE(JsCreateAstUnaryNode, NODECLASS_ExpressionStatement);
 	PARSE(Expression,n->a);
 	EXPECT_SEMICOLON;
 	return (struct JsAstNode *)n;
@@ -659,7 +666,7 @@ IfStatement_parse(parser)
 	struct JsAstNode *cond, *btrue, *bfalse;
 	struct JsAstIfStatementNode *n;
 
-	n = NEW_NODE(struct JsAstIfStatementNode, NODECLASS_IfStatement);
+	n = NEW_NODE(JsCreateAstIfStatementNode, NODECLASS_IfStatement);
 	EXPECT(tIF);
 	EXPECT('(');
 	PARSE(Expression,cond);
@@ -717,7 +724,7 @@ IterationStatement_parse(parser)
 	
 	switch (NEXT) {
 	case tDO:
-		w = NEW_NODE(struct JsAstIterationStatementWhileNode,
+		w = NEW_NODE(JsCreateAstIterationStatementWhileNode,
 			NODECLASS_IterationStatement_dowhile);
 		SKIP;
 		PARSE(Statement,w->body);
@@ -728,7 +735,7 @@ IterationStatement_parse(parser)
 		EXPECT_SEMICOLON;
 		return (struct JsAstNode *)w;
 	case tWHILE:
-		w = NEW_NODE(struct JsAstIterationStatementWhileNode,
+		w = NEW_NODE(JsCreateAstIterationStatementWhileNode,
 			NODECLASS_IterationStatement_while);
 		SKIP;
 		EXPECT('(');
@@ -753,7 +760,7 @@ IterationStatement_parse(parser)
 	    if (NEXT == tIN && 
 		  n->astClass == NODECLASS_VariableDeclaration){				
 			/* "for ( var VarDecl in" */
-			fin = NEW_NODE(struct JsAstIterationStatementForinNode,
+			fin = NEW_NODE(JsCreateAstIterationStatementForinNode,
 				NODECLASS_IterationStatement_forvarin);
 			fin->lhs = n;
 			SKIP;	/* tIN */
@@ -768,7 +775,7 @@ IterationStatement_parse(parser)
 			? "';' or 'in'"
 			: "';'"));
 					    /* "for ( var VarDeclList ;" */
-	    fn = NEW_NODE(struct JsAstIterationStatementForNode,
+	    fn = NEW_NODE(JsCreateAstIterationStatementForNode,
 		NODECLASS_IterationStatement_forvar);
 
 	    fn->init = n;
@@ -791,7 +798,7 @@ IterationStatement_parse(parser)
 	    PARSE(Expression,n);
 	    parser->noin = 0;
 	    if (NEXT == tIN && parser->is_lhs) {   /* "for ( lhs in" */
-			fin = NEW_NODE(struct JsAstIterationStatementForinNode,
+			fin = NEW_NODE(JsCreateAstIterationStatementForinNode,
 				NODECLASS_IterationStatement_forin);
 			fin->lhs = n;
 			SKIP;		/* tIN */
@@ -803,7 +810,7 @@ IterationStatement_parse(parser)
 	} else
 	    n = NULL;				/* "for ( ;" */
 
-	fn = NEW_NODE(struct JsAstIterationStatementForNode,
+	fn = NEW_NODE(JsCreateAstIterationStatementForNode,
 	    NODECLASS_IterationStatement_for);
 	fn->init = n;
 	EXPECT(';');
@@ -836,7 +843,7 @@ ContinueStatement_parse(parser)
 {
 	struct JsAstContinueStatementNode *cn;
 
-	cn = NEW_NODE(struct JsAstContinueStatementNode,
+	cn = NEW_NODE(JsCreateAstContinueStatementNode,
 		NODECLASS_ContinueStatement);
 	EXPECT(tCONTINUE);
 	EXPECT_SEMICOLON;
@@ -857,7 +864,7 @@ BreakStatement_parse(parser)
 {
 	struct JsAstBreakStatementNode *cn;
 
-	cn = NEW_NODE(struct JsAstBreakStatementNode,
+	cn = NEW_NODE(JsCreateAstBreakStatementNode,
 		NODECLASS_BreakStatement);
 	EXPECT(tBREAK);
 	EXPECT_SEMICOLON;
@@ -882,11 +889,11 @@ ReturnStatement_parse(parser)
 	if (!parser->funcdepth)
 		ERRORm("'return' not within a function");
 	if (!NEXT_IS_SEMICOLON) {
-            rn = NEW_NODE(struct JsAstReturnStatementNode,
+            rn = NEW_NODE(JsCreateAstReturnStatementNode,
                         NODECLASS_ReturnStatement);
 	    PARSE(Expression,rn->expr);
 	} else
-        rn = NEW_NODE(struct JsAstReturnStatementNode,
+        rn = NEW_NODE(JsCreateAstReturnStatementNode,
                         NODECLASS_ReturnStatement_undef);
 	EXPECT_SEMICOLON;
 	return (struct JsAstNode *)rn;
@@ -932,7 +939,7 @@ SwitchStatement_parse(parser)
 	struct JsAstCaseList **cp, *c;
 	int next;
 
-	n = NEW_NODE(struct JsAstSwitchStatementNode,
+	n = NEW_NODE(JsCreateAstSwitchStatementNode,
 		NODECLASS_SwitchStatement);
 
 	EXPECT(tSWITCH);
@@ -943,7 +950,7 @@ SwitchStatement_parse(parser)
 	cp = &n->cases;
 	n->defcase = NULL;
 	while (NEXT != '}') {
-	    c = (struct JsAstCaseList*)JsMalloc(sizeof(struct JsAstCaseList));
+	    c = JsCreateAstCaseList();
 	    *cp = c;
 	    cp = &c->next;
 	    switch (NEXT) {
@@ -986,7 +993,7 @@ ThrowStatement_parse(parser)
 {
 	struct JsAstUnaryNode *n;
 
-	n = NEW_NODE(struct JsAstUnaryNode, NODECLASS_ThrowStatement);
+	n = NEW_NODE(JsCreateAstUnaryNode, NODECLASS_ThrowStatement);
 	EXPECT(tTHROW);
 	if (NEXT_FOLLOWS_NL)
 		ERRORm("newline not allowed after 'throw'");
@@ -1050,7 +1057,7 @@ TryStatement_parse(parser)
 	else
 		ERRORm("expected 'catch' or 'finally'");
 
-	n = NEW_NODE(struct JsAstTryStatementNode, nc);
+	n = NEW_NODE(JsCreateAstTryStatementNode, nc);
 	n->block = block;
 	n->bcatch = bcatch;
 	n->bfinally = bfinally;
@@ -1084,7 +1091,7 @@ Expression_parse(parser)
 	PARSE(AssignmentExpression,n);
 	if (NEXT != ',')
 		return n;
-	cn = NEW_NODE(struct JsAstBinaryNode, NODECLASS_Expression_comma);
+	cn = NEW_NODE(JsCreateAstBinaryNode, NODECLASS_Expression_comma);
 	SKIP;
 	cn->a = n;
 	PARSE(Expression,cn->b);
@@ -1179,7 +1186,7 @@ AssignmentExpression_parse(parser)
 	default:
 		return n;
 	}
-	an = NEW_NODE(struct JsAstAssignmentExpressionNode, nc);
+	an = NEW_NODE(JsCreateAstAssignmentExpressionNode, nc);
 	an->lhs = n;
 	SKIP;
 	PARSE(AssignmentExpression,an->expr);
@@ -1213,7 +1220,7 @@ ConditionalExpression_parse(parser)
 	PARSE(LogicalORExpression,n);
 	if (NEXT != '?') 
 		return n;
-	m = NEW_NODE(struct JsAstConditionalExpressionNode,
+	m = NEW_NODE(JsCreateAstConditionalExpressionNode,
 			NODECLASS_ConditionalExpression);
 	SKIP;
 	m->a = n;
@@ -1246,7 +1253,7 @@ LogicalORExpression_parse(parser)
 	PARSE(LogicalANDExpression,n);
 	if (NEXT != tOROR) 
 		return n;
-	m = NEW_NODE(struct JsAstBinaryNode,
+	m = NEW_NODE(JsCreateAstBinaryNode,
 			NODECLASS_LogicalORExpression);
 	SKIP;
 	m->a = n;
@@ -1278,7 +1285,7 @@ LogicalANDExpression_parse(parser)
 	PARSE(BitwiseORExpression,n);
 	if (NEXT != tANDAND) 
 		return n;
-	m = NEW_NODE(struct JsAstBinaryNode,
+	m = NEW_NODE(JsCreateAstBinaryNode,
 			NODECLASS_LogicalANDExpression);
 	SKIP;
 	m->a = n;
@@ -1308,7 +1315,7 @@ BitwiseORExpression_parse(parser)
 	PARSE(BitwiseXORExpression,n);
 	if (NEXT != '|') 
 		return n;
-	m = NEW_NODE(struct JsAstBinaryNode,
+	m = NEW_NODE(JsCreateAstBinaryNode,
 			NODECLASS_BitwiseORExpression);
 	SKIP;
 	m->a = n;
@@ -1338,7 +1345,7 @@ BitwiseXORExpression_parse(parser)
 	PARSE(BitwiseANDExpression,n);
 	if (NEXT != '^') 
 		return n;
-	m = NEW_NODE(struct JsAstBinaryNode,
+	m = NEW_NODE(JsCreateAstBinaryNode,
 			NODECLASS_BitwiseXORExpression);
 	SKIP;
 	m->a = n;
@@ -1370,7 +1377,7 @@ BitwiseANDExpression_parse(parser)
 	PARSE(EqualityExpression,n);
 	if (NEXT != '&') 
 		return n;
-	m = NEW_NODE(struct JsAstBinaryNode,
+	m = NEW_NODE(JsCreateAstBinaryNode,
 			NODECLASS_BitwiseANDExpression);
 	SKIP;
 	m->a = n;
@@ -1426,7 +1433,7 @@ EqualityExpression_parse(parser)
 	    default:
 			return n;
 	    }
-	    rn = NEW_NODE(struct JsAstBinaryNode, nc);
+	    rn = NEW_NODE(JsCreateAstBinaryNode, nc);
 	    SKIP;
 	    rn->a = n;
 	    PARSE(EqualityExpression,rn->b);
@@ -1496,7 +1503,7 @@ RelationalExpression_parse(parser)
 		default:
 			return n;
 	    }
-	    rn = NEW_NODE(struct JsAstBinaryNode, nc);
+	    rn = NEW_NODE(JsCreateAstBinaryNode, nc);
 	    SKIP;
 	    rn->a = n;
 	    PARSE(RelationalExpression,rn->b);
@@ -1539,7 +1546,7 @@ ShiftExpression_parse(parser)
 	    default:
 			return n;
 	    }
-	    sn = NEW_NODE(struct JsAstBinaryNode, nc);
+	    sn = NEW_NODE(JsCreateAstBinaryNode, nc);
 	    SKIP;
 	    sn->a = n;
 	    PARSE(AdditiveExpression,sn->b);
@@ -1579,7 +1586,7 @@ AdditiveExpression_parse(parser)
 	    }
 	    parser->is_lhs = 0;
 	    SKIP;
-	    m = NEW_NODE(struct JsAstBinaryNode, nc);
+	    m = NEW_NODE(JsCreateAstBinaryNode, nc);
 	    m->a = n;
 	    PARSE(MultiplicativeExpression,m->b);
 	    n = (struct JsAstNode *)m;
@@ -1623,7 +1630,7 @@ MultiplicativeExpression_parse(parser)
 			return n;
 	    }
 	    SKIP;
-	    m = NEW_NODE(struct JsAstBinaryNode, nc);
+	    m = NEW_NODE(JsCreateAstBinaryNode, nc);
 	    m->a = n;
 	    PARSE(UnaryExpression,m->b);
 	    parser->is_lhs = 0;
@@ -1687,7 +1694,7 @@ UnaryExpression_parse(parser)
 		PARSE(PostfixExpression,p);
 		return p;
 	}
-	n = NEW_NODE(struct JsAstUnaryNode, nc);
+	n = NEW_NODE(JsCreateAstUnaryNode, nc);
 	SKIP;
 	PARSE(UnaryExpression,n->a);
 	parser->is_lhs = 0;
@@ -1715,7 +1722,7 @@ PostfixExpression_parse(parser)
 	if (!NEXT_FOLLOWS_NL && 
 	    (NEXT == tPLUSPLUS || NEXT == tMINUSMINUS))
 	{
-		pen = NEW_NODE(struct JsAstUnaryNode,
+		pen = NEW_NODE(JsCreateAstUnaryNode,
 			NEXT == tPLUSPLUS
 			    ? NODECLASS_PostfixExpression_inc
 			    : NODECLASS_PostfixExpression_dec);
@@ -1799,7 +1806,7 @@ Arguments_parse(parser)
 	struct JsAstArgumentsNode *n;
 	struct JsAstArgumentsArg **argp;
 
-	n = NEW_NODE(struct JsAstArgumentsNode,
+	n = NEW_NODE(JsCreateAstArgumentsNode,
 			NODECLASS_Arguments);
 	argp = &n->first;
 	n->argc = 0;
@@ -1807,7 +1814,7 @@ Arguments_parse(parser)
 	EXPECT('(');
 	while (NEXT != ')') {
 		n->argc++;
-		*argp = (struct JsAstArgumentsArg *)JsMalloc( sizeof(struct JsAstArgumentsArg));
+		*argp =JsCreateAstArgumentsArg();
 		PARSE(AssignmentExpression,(*argp)->expr);
 		argp = &(*argp)->next;
 		if (NEXT != ')')
@@ -1835,7 +1842,7 @@ MemberExpression_parse(parser)
 			PARSE(FunctionExpression,n);
 			break;
         case tNEW:
-			m = NEW_NODE(struct JsAstMemberExpressionNewNode,
+			m = NEW_NODE(JsCreateAstMemberExpressionNewNode,
 				NODECLASS_MemberExpression_new);
 			SKIP;
 			PARSE(MemberExpression,m->mexp );
@@ -1852,7 +1859,7 @@ MemberExpression_parse(parser)
 	for (;;)
 	    switch (NEXT) {
 	    case '.':
-			dn = NEW_NODE(struct JsAstMemberExpressionDotNode,
+			dn = NEW_NODE(JsCreateAstMemberExpressionDotNode,
 				NODECLASS_MemberExpression_dot);
 			SKIP;
 			if (NEXT == tIDENT) {
@@ -1863,7 +1870,7 @@ MemberExpression_parse(parser)
 			EXPECT(tIDENT);
 			break;
 	    case '[':
-			bn = NEW_NODE(struct JsAstMemberExpressionBracketNode,
+			bn = NEW_NODE(JsCreateAstMemberExpressionBracketNode,
 				NODECLASS_MemberExpression_bracket);
 			SKIP;
 			bn->mexp = n;
@@ -1901,7 +1908,7 @@ LeftHandSideExpression_parse(parser)
 
 	    switch (NEXT) {
 	    case '.':
-	        dn = NEW_NODE(struct JsAstMemberExpressionDotNode,
+	        dn = NEW_NODE(JsCreateAstMemberExpressionDotNode,
 		    NODECLASS_MemberExpression_dot);
 			SKIP;
 			if (NEXT == tIDENT) {
@@ -1912,7 +1919,7 @@ LeftHandSideExpression_parse(parser)
 	        EXPECT(tIDENT);
 			break;
 	    case '[':
-			bn = NEW_NODE(struct JsAstMemberExpressionBracketNode,
+			bn = NEW_NODE(JsCreateAstMemberExpressionBracketNode,
 				NODECLASS_MemberExpression_bracket);
 			SKIP;
 			bn->mexp = n;
@@ -1921,7 +1928,7 @@ LeftHandSideExpression_parse(parser)
 			EXPECT(']');
 			break;
 	    case '(':
-			cn = NEW_NODE(struct JsAstCallExpressionNode,
+			cn = NEW_NODE(JsCreateAstCallExpressionNode,
 				NODECLASS_CallExpression);
 			cn->exp = n;
 			PARSE(Arguments,cn->args );
@@ -1962,14 +1969,13 @@ ObjectLiteral_parse(parser)
 	struct JsAstObjectLiteralPair **pairp;
 	double value;
 	char* buf;
-	n = NEW_NODE(struct JsAstObjectLiteralNode,
+	n = NEW_NODE(JsCreateAstObjectLiteralNode,
 			NODECLASS_ObjectLiteral);
 	pairp = &n->first;
 
 	EXPECT('{');
 	while (NEXT != '}') {
-	    *pairp = (struct JsAstObjectLiteralPair*)JsMalloc( 
-			sizeof(struct JsAstObjectLiteralPair));
+	    *pairp = JsCreateAstObjectLiteralPair();
 	    switch (NEXT) {
 	    case tIDENT:
 	    case tSTRING:
@@ -1978,7 +1984,7 @@ ObjectLiteral_parse(parser)
 			break;
 	    case tNUMBER:
 			value = NEXT_VALUE->number;
-			buf = (char*)JsMalloc(128);
+			buf = (char*)JsGcMalloc(128,NULL,NULL);
 			if(value - (int)value == 0){
 				//整数
 				sprintf(buf,"%d",(int)value);
@@ -2038,7 +2044,7 @@ ArrayLiteral_parse(parser)
 	struct JsAstArrayLiteralElement **elp;
 	int index;
 
-	n = NEW_NODE(struct JsAstArrayLiteralNode,
+	n = NEW_NODE(JsCreateAstArrayLiteralNode,
 	    NODECLASS_ArrayLiteral);
 	elp = &n->first;
 
@@ -2049,8 +2055,7 @@ ArrayLiteral_parse(parser)
 			index++;
 			SKIP;
 		} else {
-			*elp = (struct JsAstArrayLiteralElement*)JsMalloc(
-				sizeof(struct JsAstArrayLiteralElement));
+			*elp = JsCreateAstArrayLiteralElement();
 			(*elp)->index = index;
 			PARSE(AssignmentExpression,(*elp)->expr);
 			elp = &(*elp)->next;
@@ -2086,11 +2091,11 @@ PrimaryExpression_parse(parser)
 
 	switch (NEXT) {
 	case tTHIS:
-		n = NEW_NODE(struct JsAstNode, NODECLASS_PrimaryExpression_this);
+		n = NEW_NODE(JsCreateAstNode, NODECLASS_PrimaryExpression_this);
 		SKIP;
 		return n;
 	case tIDENT:
-		i = NEW_NODE(struct JsAstPrimaryExpressionIdentNode,
+		i = NEW_NODE(JsCreateAstPrimaryExpressionIdentNode,
 			NODECLASS_PrimaryExpression_ident);
 		i->string = NEXT_VALUE->string;
 		SKIP;
@@ -2140,15 +2145,15 @@ Literal_parse(parser)
 
 	switch (NEXT) {
 	case tNULL:
-		n = NEW_NODE(struct JsAstLiteralNode, NODECLASS_Literal);
-		n->value = (struct JsValue*) JsMalloc(sizeof(struct JsValue));
+		n = NEW_NODE(JsCreateAstLiteralNode, NODECLASS_Literal);
+		n->value = JsCreateValue();
 		n->value->type = JS_NULL;
 		SKIP;
 		return (struct JsAstNode *)n;
 	case tTRUE:
 	case tFALSE:
-		n = NEW_NODE(struct JsAstLiteralNode,  NODECLASS_Literal);
-		n->value = (struct JsValue*) JsMalloc(sizeof(struct JsValue));
+		n = NEW_NODE(JsCreateAstLiteralNode,  NODECLASS_Literal);
+		n->value = JsCreateValue();
 		n->value->type = JS_BOOLEAN;
 		n->value->u.boolean = (NEXT == tTRUE ? TRUE : FALSE);
 		SKIP;
@@ -2176,8 +2181,8 @@ NumericLiteral_parse(parser)
 	struct JsAstLiteralNode *n;
 
 	EXPECT_NOSKIP(tNUMBER);
-	n = NEW_NODE(struct JsAstLiteralNode, NODECLASS_Literal);
-	n->value = (struct JsValue*) JsMalloc(sizeof(struct JsValue));
+	n = NEW_NODE(JsCreateAstLiteralNode, NODECLASS_Literal);
+	n->value = JsCreateValue();
 	n->value->type = JS_NUMBER;
 	n->value->u.number = NEXT_VALUE->number;
 	SKIP;
@@ -2195,7 +2200,7 @@ StringLiteral_parse(parser)
 	struct JsAstStringLiteralNode *n;
 
 	EXPECT_NOSKIP(tSTRING);
-	n = NEW_NODE(struct JsAstStringLiteralNode, NODECLASS_StringLiteral);
+	n = NEW_NODE(JsCreateAstStringLiteralNode, NODECLASS_StringLiteral);
 	n->string = NEXT_VALUE->string;
 	SKIP;
 	return (struct JsAstNode *)n;
@@ -2248,7 +2253,7 @@ FunctionExpression_parse(parser)
 	parser->noin = 0;
 	parser->is_lhs = 0;
 
-	n = NEW_NODE(struct JsAstFunctionNode, NODECLASS_FunctionExpression);
+	n = NEW_NODE(JsCreateAstFunctionNode, NODECLASS_FunctionExpression);
 	if(NEXT == tSYNCHRONIZED){
 		n->isSync = TRUE;
 		SKIP;
@@ -2281,7 +2286,7 @@ FunctionExpression_parse(parser)
 		p = p->next;
 	}
 	n->argc = count;
-	n->argv = (char**) JsMalloc(sizeof(char*) * count);
+	n->argv = (char**) JsGcMalloc(sizeof(char*) * count,&JsGcMarkArray,NULL);
 	i = 0;
 	for( p = formal; i<count && p!= NULL ;++i){
 		n->argv[i] = p->name;
@@ -2304,14 +2309,14 @@ FormalParameterList_parse(parser)
 	p = &result;
 
 	if (NEXT == tIDENT) {
-	    *p = (struct var*)JsMalloc(sizeof(struct var));
+	    *p = (struct var*)JsGcMalloc(sizeof(struct var),&JsGcMarkVar,NULL);
 	    (*p)->name = NEXT_VALUE->string;
 	    p = &(*p)->next;
 	    SKIP;
 	    while (NEXT == ',') {
 			SKIP;
 			if (NEXT == tIDENT) {
-				*p = (struct var*)JsMalloc(sizeof(struct var));
+				*p = (struct var*)JsGcMalloc(sizeof(struct var),&JsGcMarkVar,NULL);
 				(*p)->name = NEXT_VALUE->string;
 				p = &(*p)->next;
 			}
@@ -2328,7 +2333,7 @@ FunctionBody_parse(parser)
 {
     struct JsAstFunctionBodyNode *n;
 
-	n = NEW_NODE(struct JsAstFunctionBodyNode, NODECLASS_FunctionBody);
+	n = NEW_NODE(JsCreateAstFunctionBodyNode, NODECLASS_FunctionBody);
 	PARSE(SourceElements,n->u.a);
 	n->is_program = 0;
 	return (struct JsAstNode *)n;
@@ -2352,7 +2357,7 @@ struct JsAstNode* JsParseFile(int debug, char* filename){
 		return NULL;
 	}
 	
-	parser = (struct JsParser*) JsMalloc(sizeof(struct JsParser));
+	parser = (struct JsParser*) JsGcMalloc(sizeof(struct JsParser),&JsGcMarkParser,NULL);
 	memset(parser,0,sizeof(struct JsParser));
 	
 	
@@ -2365,7 +2370,7 @@ struct JsAstNode* JsParseFile(int debug, char* filename){
 	}
 	yyset_in(file,lexer);
 	parser->lexer = lexer;
-	parser->filename = (char*)JsMalloc(strlen(filename) + 4);
+	parser->filename = (char*)JsGcMalloc(strlen(filename) + 4,NULL,NULL);
 	strcpy(parser->filename,filename);
 	
 	if(debug >= JS_PARSER_DEBUG_ALL){
@@ -2409,7 +2414,7 @@ struct JsAstNode* JsParseString(int debug, char* string){
 		return NULL;
 	}
 	
-	parser = (struct JsParser*) JsMalloc(sizeof(struct JsParser));
+	parser = (struct JsParser*) JsGcMalloc(sizeof(struct JsParser),&JsGcMarkParser,NULL);
 	memset(parser,0,sizeof(struct JsParser));
 	
 	

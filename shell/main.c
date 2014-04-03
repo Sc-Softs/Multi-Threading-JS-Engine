@@ -30,12 +30,12 @@ static void JsPrintFn(struct JsEngine* e,void* data,struct JsValue* res){
 	JsPrintValue(&v);
 }
 static void CreatePrintFn(){
-	char** argv = JsMalloc(sizeof(char*) * 1);
+	char** argv = JsGcMalloc(sizeof(char*) * 1,NULL,NULL);
 	argv[0] = "value";
 	//创建PrintFunction
 	struct JsObject* print = JsCreateStandardSpecFunction(NULL,NULL,1,argv,
 		&JsPrintFn,NULL,"print",FALSE);
-	struct JsValue* vPrint = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* vPrint = JsCreateValue();
 	vPrint->type = JS_OBJECT;
 	vPrint->u.object = print;
 	(*JsGetVm()->Global->Put)(JsGetVm()->Global,"print",vPrint,JS_OBJECT_ATTR_STRICT);
@@ -43,19 +43,18 @@ static void CreatePrintFn(){
 
 /*****************************Run First Task*********************************/
 static void JsContextTask(struct JsEngine* e,void* data){
+
 	char* path = "../../test/";
 	DIR *pdir;
-    struct dirent *pdirent;
-    char temp[256];
-    pdir = opendir(path);
-    if(pdir)
-    {
-        while((pdirent = readdir(pdir)))
-        {
-            //跳过"."和".."
-            if(strcmp(pdirent->d_name, ".") == 0
-                    || strcmp(pdirent->d_name, "..") == 0)
-                continue;
+	struct dirent *pdirent;
+	char temp[256];
+	pdir = opendir(path);
+	if(pdir){
+		while((pdirent = readdir(pdir))){
+			//跳过"."和".."
+			if(strcmp(pdirent->d_name, ".") == 0
+					|| strcmp(pdirent->d_name, "..") == 0)
+				continue;
 			sprintf(temp,"%s%s",path,pdirent->d_name);
 			printf("open test file  : %s \n", temp);
 			//测试test/*文件
@@ -71,21 +70,23 @@ static void JsContextTask(struct JsEngine* e,void* data){
 				JsPrintValue(err);
 				JsPrintStack(JsGetExceptionStack());
 			}
-        }
-    }
-    else
-    {
-        printf("opendir error:%s\n", path);
-    }
-    closedir(pdir);
+		}
+	}
+	else{
+		printf("opendir error:%s\n", path);
+	}
+	closedir(pdir);
 
 }
 int main(){
 	JsCreateVm(TRUE,0,NULL, NULL);
-	struct JsEngine* e = JsCreateEngine();
-	struct JsContext* c = JsCreateContext(e, NULL);
 	CreatePrintFn();
-	JsDispatch(c,&JsContextTask,NULL);
+	struct JsEngine* e = JsCreateEngine();
+	int i = 0;
+	for( i = 0 ; i < 3; ++i){
+		struct JsContext* c = JsCreateContext(e, NULL);
+		JsDispatch(c,&JsContextTask,NULL);		
+	}
 	//安全推出主线程
 	JsCloseSelf();
 	return 0;

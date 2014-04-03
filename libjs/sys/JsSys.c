@@ -8,6 +8,7 @@
 #include"JsInit.h"
 #include"JsDebug.h"
 #include"JsException.h"
+#include<signal.h>
 #include<stdlib.h>
 #include<stdio.h>
 #include<string.h>
@@ -15,21 +16,31 @@
 #include<unistd.h>
 
 /***********************************内存管理模块 API*******************************/
+/*
+	内存回收的时候, 会停止全部线程, 然后等待GC结束, 回收的内存为主内存区标记 JS_GC_MISS 的内存快, 
+JS_GC_MISS 是防止在Stop the World的时候, 处理A->B 关系图为 A->C->B的时候, 引用临时断裂而造成内存错误被回收的情况,
+如果一块内存快未命中 JS_GC_MISS 则代表该进程已经死了, 虽然错误率还有, 但是基本不大.
+	内存快如果处于TLS->HashTable中, 则不进行回收.
+*/
+//Hash Table表大小
+#define JS_GC_HASH_TABLE_SIZE 	1024*1024
+//Key Table初始化大小, 随后会增长
+#define JS_GC_KEY_TABLE_SIZE 	64
+//Root Table初始化大小, 随后会增长
+#define JS_GC_ROOT_TABLE_SIZE  	1024
+//检测到内存到达上限, 则会停止所有线程进入GC
+//(单位 : KB)
+#define JS_GC_MEMORY_LINE 		1024
+//未命中数值, 一旦内存快(主存中的)未命中次数到达指定数, 则回收
+#define JS_GC_MISS 				2
+//GC 线程睡觉的时间, 如果内存充足, 建议时间拉长点
+#define JS_GC_SLEEP				10
 
-//初始化Hash表大小
-#define JS_HASH_TABLE_SIZE 	1024
-//Key Table初始化大小
-#define JS_KEY_TABLE_SIZE 	64
-//Root Table初始化大小
-#define JS_ROOT_TABLE_SIZE  1024
-//内存超过该上限, Engine在轮转的时候会停止等待GC
-//(单位 : MB)
-#define JS_GC_MEMORY_LINE 	128
 
 /*BP 和 MP 转换宏*/
 #define JS_MP2BP(mp,bp)				\
 	do{								\
-		bp = (struct JsBlock*)mp;	\
+		bp = (struct JsGcBlock*)mp;	\
 		bp--;						\
 	}while(0)
 	
@@ -45,51 +56,84 @@
 内存分布结构:
 
 Block+Mem
-	bp--> -------------------
-		 |Fn|int|    mem    |
-		 -------------------
-				|
-		 mp---->|
+	bp--> ------------------------------
+		 |MarkFn|FreeFn|int|    Mem     |
+		 -------------------------------
+						   |
+					mp---->|
 		 
-KeyTable:
-	  JsMan->table-->----------
-	                 | JsKey*  |
+KeyMan:
+	  JsGcMan->table-->----------
+	                 | JsGcKey*  |
 					 ----------
-					 | JsKey*  |
+					 | JsGcKey*  |
 					 ----------
-					 | JsKey*  |
+					 | JsGcKey*  |
 					 ----------
-					 | JsKey*  |
+					 | JsGcKey*  |
 					 ----------
 				
-RootTable:
-	   JsMan->table->--------
-	                 | JsRoot* |
+RootMan:
+	   JsGcMan->table->--------
+	                 | JsGcRoot* |
 					 ---------
-					 | JsRoot* |
+					 | JsGcRoot* |
 					 ---------
-					 | JsRoot* |
+					 | JsGcRoot* |
 					 ---------
-					 | JsRoot* |
+					 | JsGcRoot* |
 					 ---------
 					 
-HASH_TABLE---->|
-			   ---------------
-			   |   JsHtNode*   |
-			   ----------------        --------------------
-			   |   JsHtNode*   | ----->|Mark | mp | next |
-			   ----------------       --------------------
-			   |   JsHtNode*   |
-			   ----------------
-					.
-					.
-					.
-				---------------
-			   |   JsHtNode*   |
-			   ----------------
+JsGcTlsList---->+
+				+
+				+[TID1]-->|
+						   ---------------
+						   |   JsGcHtNode*   |
+						   ----------------        	  --------------------
+						   |   JsGcHtNode*   | ----->|Count | mp | next |
+						   ----------------       	 --------------------
+						   |   JsGcHtNode*   |
+						   ----------------
+								.
+								.
+								.
+							---------------
+						   |   JsGcHtNode*   |
+						   ----------------
+						   
+				+[TID2]--->|
+						  ---------------
+						   |   JsGcHtNode*   |
+						   ----------------          --------------------
+						   |   JsGcHtNode*   | ----->|Count | mp | next |
+						   ----------------          --------------------
+						   |   JsGcHtNode*   |
+						   ----------------
+								.
+								.
+								.
+							---------------
+						   |   JsGcHtNode*   |
+						   ----------------
+Gc后, 可以回收垃圾的表(Main)					   
+JsGcMainHt(主存):----->|
+					   |
+					   ---------------
+					   |   JsGcHtNode*   |
+					   ----------------          --------------------
+					   |   JsGcHtNode*   | ----->|Count | mp | next |
+					   ----------------          --------------------
+					   |   JsGcHtNode*   |
+					   ----------------
+							.
+							.
+							.
+						---------------
+					   |   JsGcHtNode*   |
+					   ----------------
 */
 
-struct JsMan{
+struct JsGcMan{
 	//全部空间大小
 	int total;
 	//已经被使用的大小
@@ -97,108 +141,132 @@ struct JsMan{
 	void* table;
 };
 
-struct JsKey{
+struct JsGcKey{
 	void* key;
 	char* desc;
 };
 
-struct JsRoot{
+struct JsGcRoot{
 	void* mp; //Mem内存指针
 	void* key;// 有效key
 };
 
-struct JsHtNode{
-	int mark;
-	void* mp;
-	struct JsHtNode* next;
-};
 /*申请内存时, 添加的头*/
-struct JsBlock{
+struct JsGcBlock{
 	JsGcMarkFn markFn; //内存关联mark函数
 	JsGcFreeFn freeFn; //内存关联析构函数
 	int size; //申请内存的大小
 };
 
+/*Hash Table 的节点*/
+struct JsGcHtNode{
+	/*
+		命中计数:
+			-1 : 表示DoMark中被标记中
+			0+ : 未命中
+	*/
+	int count;
+	void* mp;
+	struct JsGcHtNode* next;
+};
 
+struct JsGcTlsNode{
+	/*所属的线程ID*/
+	pthread_t  tid;
+	/*所属线程的hash table*/
+	struct JsGcHtNode **table;
+	/*table中包含的内存大小*/
+	unsigned int size;
+	/*Tls锁*/
+	pthread_mutex_t* lock;
+	/*下一个JsGcTlsNode*对象*/
+	struct JsGcTlsNode* next;
+};
+/*++++++++++++++++++++全局静态变量区++++++++++++++++++++++*/
 
+//组合Tls中JsGcTlsNode*的List
+static struct JsGcTlsNode* JsGcTlsList = NULL;
 
-/*Hash Table*/
-static struct JsHtNode* JsGcHashTable[JS_HASH_TABLE_SIZE] = {NULL};
+/*Hash Table 主存*/
+static struct JsGcHtNode* JsGcMainHt[JS_GC_HASH_TABLE_SIZE] = {NULL};
 
 /*Key Manager*/
-static struct JsMan* JsGcKeyMan;
+static struct JsGcMan* JsGcKeyMan;
 
 /*RootManager*/
-static struct JsMan* JsGcRootMan;
+static struct JsGcMan* JsGcRootMan;
 
-/* Gc Lock, 在对GC相关数据进行修改的时候, 需要加锁 */
-static pthread_mutex_t* JsGcLock = NULL; 
 /*申请内存大小计数(byte), 可以计数4GB的内存空间*/
 static unsigned int JsGcMemory = 0;
 
+/*GC阶段标识*/
+static int JsGcStage = FALSE;
+/*++++++++++++++++++++全局静态锁和标记区++++++++++++++++++++++*/
 
 
-/* 
-	请求进行GC工作的标志, 只有先有这个请求, GC才会在满足条件的时候进行GC,
-	完成GC工作后, 需要重置为 FALSE, 当为TRUE的时候, 表示请求进行GC工作
-*/
-static int JsGcReqed  = FALSE;
-/*
-	正在进行GcWork的标记, 如果此间访问任何GC API, 除(doMark) , 都直接暂停,
-因为在Gc期间不能使用heap内存.
-*/
-static int JsGcWorking   = FALSE;
-/*Trap Lock*/
-static pthread_mutex_t JsGcTrapLock = PTHREAD_MUTEX_INITIALIZER;
-/*当Gc完成的时候, 需要使用pthread_cond_broadcast(&JsGcTrapCond) 来激活等待Gc完成的函数*/
-static pthread_cond_t JsGcTrapCond 	= PTHREAD_COND_INITIALIZER;
+/* GcLock, 对全局数据进行操作的时候, 需要加锁 */
+static pthread_mutex_t* JsGcLock = NULL;
 
+/*Stop of the world Lock*/
+static pthread_mutex_t* JsGcStopLock = NULL;
+/*Stop of the world Cond*/
+static pthread_cond_t JsGcStopCond 	= PTHREAD_COND_INITIALIZER;
+
+/* 获取线程Tls中的JsGcTlsNode*对象*/
+static pthread_key_t* JsGcTlsKey = NULL;
 /*-------------------------------------------------------------------*/
 
-/*Gc模块初始化函数*/
-static void JsPrevInitGc();
-static void JsPostInitGc();
-
-/*将mp插入到hashtable中*/
-static int JsHashInsert(void* mp);
-/*将mp从hashTable中删除*/
-static int JsHashRemove(void* mp);
+/*将mp插入到hashtable中,加Tls锁*/
+static int JsGcMpInsert(struct JsGcHtNode** table,void* mp);
 /*
-	根据mp 查到 JsHtNode
+	将mp从table中删除
+*/
+static int JsGcMpRemove(struct JsGcHtNode** table,void* mp);
+/*
+	根据mp 查到 JsGcHtNode, 搜索全部Ht(Main+Tls)
 	返回:
 		NULL 	: 不在HashTable中
 		!NULL	: 正常数据
 */
-static struct JsHtNode* JsFindHtNode(void* mp);
+static struct JsGcHtNode* JsGcFindHtNode(struct JsGcHtNode** table,void* mp);
 /*计算mp指针对应的hashcode*/
-static int JsHashCode(void* mp);
-/*把所有节点标记都清空 为 FALSE*/
-static void JsUnMarkHtNode();
-/*释放所有没有被标记的节点*/
-static void JsFreeUnMarkHtNode();
+static int JsGcHashCode(void* mp);
+
 
 
 /*GC线程*/
 static void* JsGcThread(void* data);
 /*进行GC工作*/
-static void JsGcDoWork();
+static void JsGcWork();
+/*
+	刷新表中node->count = -1 --> 0 , 来重新标记
+*/
+static void JsGcRefreshHtNode(struct JsGcHtNode** table);
+/*
+		释放主存中到达释放计数的内存节点, 如果为
+	非释放条件, 则为命中计数++
+*/
+static void JsGcFreeMainHtNode();
+/*TlsNode->HashTable中的数据 和 大小 刷入主存等待回收,  最后清空*/
+static void JsGcCommit0(struct JsGcTlsNode* node);
+
+
+/*收到Gc信号(USR1)的时候, 调用的函数, 停止线程, 并且等待Gc结束(JsGcStopCond)*/
+static void JsGcSigHandler(int sig);
+/*开启线程的时候, 需要调用该函数, 来启动Gc功能*/
+static void JsGcTBegin();
+/*开启线程时, 对本线程中JsGcHtNode以及相关数据进行处理*/
+static void JsGcBtTls();
+/*线程结束时, 调用该函数释放Tls的数据*/
+static void JsGcEtTls(void *data);
+
+
+
+/*Gc模块初始化函数*/
+static void JsPrevInitGc();
+static void JsPostInitGc();
+
 /*-------------------------------------------------------------------*/
-
-
-void* JsMalloc(int size){
-	if( size <= 0 )  
-		return NULL;
-	void * p = malloc(size);
-	JsAssert(p != NULL);
-	memset(p,0,size);
-	return p;
-}
-void* JsReAlloc(void* mem,int newSize){
-	void* p = realloc(mem,newSize);
-	JsAssert(p != NULL);
-	return p;
-}
-
 
 /*
 	委托到GC管理的内存中
@@ -209,16 +277,13 @@ void* JsReAlloc(void* mem,int newSize){
 */
 void* JsGcMalloc(int size,JsGcMarkFn markFn,JsGcFreeFn freeFn){
 
-	pthread_mutex_lock(JsGcLock);
-	//Gc工作期间, 不能再使用该API 
-	if(JsGcWorking == TRUE)
-		JsAssert(FALSE);
-	JsAssert(size > 0);
+	JsAssert(size >= 0);
+	
 	/*block + size*/
-	struct JsBlock* bp = malloc(size + sizeof(struct JsBlock));
+	struct JsGcBlock* bp =(struct JsGcBlock*) malloc(size + sizeof(struct JsGcBlock));
 	JsAssert(bp != NULL);
 	//clear
-	memset(bp,0,size + sizeof(struct JsBlock));
+	memset(bp,0,size + sizeof(struct JsGcBlock));
 	/*set Block */
 	bp->markFn = markFn;
 	bp->freeFn = freeFn;
@@ -226,11 +291,16 @@ void* JsGcMalloc(int size,JsGcMarkFn markFn,JsGcFreeFn freeFn){
 	/*将MP插入到Hash表中进行管理*/
 	void* mp;
 	JS_BP2MP(bp,mp);
-	JsHashInsert(mp);
-	/*记录内存申请大小*/
-	JsGcMemory += size;
+	//获得Tls的table
+	struct JsGcTlsNode* node = (struct JsGcTlsNode*)pthread_getspecific(*JsGcTlsKey);
+	//加锁, 防止GC线程破坏插入过程
+	pthread_mutex_lock(node->lock);
+	//插入Tls->Ht中
+	JsGcMpInsert(node->table,mp);
+	//增加本Tls申请内存的计数
+	node->size += size;
+	pthread_mutex_unlock(node->lock);
 	
-	pthread_mutex_unlock(JsGcLock);
 	return mp;
 }
 /*
@@ -239,85 +309,91 @@ void* JsGcMalloc(int size,JsGcMarkFn markFn,JsGcFreeFn freeFn){
 */
 void* JsGcReAlloc(void* mp0,int newSize){
 
-	JsAssert(mp0 != NULL && newSize > 0);
+	JsAssert(mp0 != NULL && newSize >= 0);
 	
-	pthread_mutex_lock(JsGcLock);
-	//Gc工作期间, 不能再使用该API 
-	if(JsGcWorking == TRUE)
-		JsAssert(FALSE);
-		
-	void *mp1;
-	struct JsBlock *bp0, *bp1;
+	void *mp1 = NULL;
+	struct JsGcBlock *bp0, *bp1;
 	JS_MP2BP(mp0,bp0);
-	/*删除该内存记录大小*/
-	JsGcMemory -= bp0->size;
-	/*block + size*/
-	bp1 = realloc(bp0,newSize + sizeof(struct JsBlock));
-	JsAssert(bp1 != NULL);
-	//fn不变
-	bp1->size = newSize;
 	
-	//block内存地址被修改了
-	if(bp1 != bp0){
+	//判断是否在Tls还是Main中(Tls把内存已经Commit到主存了)
+	struct JsGcTlsNode* node = (struct JsGcTlsNode*)pthread_getspecific(*JsGcTlsKey);
+	pthread_mutex_lock(node->lock);
+	struct JsGcHtNode* htNode = JsGcFindHtNode(node->table,mp0);
+	if(htNode != NULL){
+		//在Tls中
+		
+		//删除原先block大小
+		node->size -= bp0->size;
+		//realloc
+		bp1 = realloc(bp0,newSize + sizeof(struct JsGcBlock));
+		JsAssert(bp1 != NULL);
+		bp1->size = newSize;
+		//获取新mp1地址
 		JS_BP2MP(bp1,mp1);
-		//删除原先Hash表中该对象
-		JsHashRemove(mp0);
-		JsHashInsert(mp1);
+		//block内存地址被修改了
+		if(bp1 != bp0){
+			//删除原先Hash表中该对象	
+			JsGcMpRemove(node->table,mp0);
+			JsGcMpInsert(node->table,mp1);
+		}
+		/*添加新增内存大小*/
+		node->size += newSize;
+	}else{
+		//在主存中, 则新申请内存, 放在Tls中, 原先的内存快等待回收 
+		bp1 = malloc(newSize + sizeof(struct JsGcBlock));
+		JsAssert(bp1 != NULL);
+		//拷贝
+		memcpy(bp1,bp0,bp0->size);
+		bp1->size = newSize;
+		
+		//获取新mp1地址
+		JS_BP2MP(bp1,mp1);
+		JsGcMpInsert(node->table,mp1);
+		/*添加新增内存大小*/
+		node->size += newSize;
 	}
-	/*添加新增内存大小*/
-	JsGcMemory += newSize;
-	
-	pthread_mutex_unlock(JsGcLock);
+	pthread_mutex_unlock(node->lock);
 	return mp1;
 
 }
 /*标记指向内存空间为可用, 并且调用申请该内存空间时候, 配置的fn*/
-int JsGcDoMark(void* mp){
+int JsGcMark(void* mp){
 	if(mp == NULL)
 		return 0;
-	pthread_mutex_lock(JsGcLock);
-	struct JsHtNode* node = JsFindHtNode(mp);
+	JsAssert(JsGcStage != FALSE);
+	struct JsGcHtNode* node = NULL;
+	//查询mp的节点, 首先查询主存
+	node = JsGcFindHtNode(JsGcMainHt,mp);
+	//检测是否在Tls中
+	if(node==NULL){
+		struct JsGcTlsNode** tlspp = &JsGcTlsList;
+		while(*tlspp != NULL){
+			node = JsGcFindHtNode((*tlspp)->table,mp);
+			//查询到该节点
+			if(node != NULL)
+				break;
+			//下一个TlsNode
+			tlspp = &(*tlspp)->next;
+		}
+	}
+	//根据node, 执行相关动作
 	if(node == NULL){
-		pthread_mutex_unlock(JsGcLock);
+		//该内存不受GC管理
 		return -1;
 	}
-	if(node->mark == TRUE){
-		pthread_mutex_unlock(JsGcLock);
+	if(node->count == -1){
+		//已经命中过
 		return 1;
 	}
 	//Mark the node
-	node->mark = TRUE;
-	struct JsBlock* bp = NULL;
+	node->count = -1;
+	struct JsGcBlock* bp = NULL;
 	JS_MP2BP(mp,bp);
 	//调用该mp对应的mark函数, 用于mark 和该内存快关联的内存
 	if(bp->markFn != NULL)
-		(*bp->markFn)(mp);
-	pthread_mutex_unlock(JsGcLock);
+		(*bp->markFn)(mp,bp->size);
+
 	return 0;
-}
-/*重新配置该内存指向的mark函数*/
-void JsGcSetMarkFn(void* mp,JsGcMarkFn markFn){
-	pthread_mutex_lock(JsGcLock);
-	//Gc工作期间, 不能再使用该API 
-	if(JsGcWorking == TRUE)
-		JsAssert(FALSE);
-	JsAssert(mp!=NULL);
-	struct JsBlock* bp;
-	JS_MP2BP(mp,bp);
-	bp->markFn = markFn;
-	pthread_mutex_unlock(JsGcLock);
-}
-/*重新配置该内存指向的free函数*/
-void JsGcSetFreeFn(void* mp,JsGcMarkFn freeFn){
-	pthread_mutex_lock(JsGcLock);
-	//Gc工作期间, 不能再使用该API 
-	if(JsGcWorking == TRUE)
-		JsAssert(FALSE);
-	JsAssert(mp!=NULL);
-	struct JsBlock* bp;
-	JS_MP2BP(mp,bp);
-	bp->freeFn = freeFn;
-	pthread_mutex_unlock(JsGcLock);
 }
 /*
 	Gc中添加一个有效的Key类型(指针类型),Key != 0
@@ -325,16 +401,13 @@ void JsGcSetFreeFn(void* mp,JsGcMarkFn freeFn){
 int JsGcRegistKey(void* key,const char* desc){
 
 	pthread_mutex_lock(JsGcLock);
-	//Gc工作期间, 不能再使用该API 
-	if(JsGcWorking == TRUE)
-		JsAssert(FALSE);
+
 	JsAssert(key != NULL);
-	struct JsKey** keypp ;
+	struct JsGcKey** keypp ;
 	int i,size;
 	
-	
 	//查询是否已经存在
-	keypp = (struct JsKey** ) JsGcKeyMan->table;
+	keypp = (struct JsGcKey** ) JsGcKeyMan->table;
 	size = JsGcKeyMan->total;
 	for(i=0 ; i < size ; ++i){
 		if(keypp[i] != NULL && keypp[i]->key == key){
@@ -352,25 +425,24 @@ int JsGcRegistKey(void* key,const char* desc){
 		int newTotal =  oldTotal * 2;
 		
 		//重新配置table空间大小
-		int oldSize = sizeof(struct JsKey*) * oldTotal;
-		int newSize = sizeof(struct JsKey*) * newTotal;
-		
+		//int oldSize = sizeof(struct JsGcKey*) * oldTotal;
+		int newSize = sizeof(struct JsGcKey*) * newTotal;
 		//重新申请
-		void* table = realloc(JsGcKeyMan->table,newSize);
-		//刷新新申请空间
-		memset(table + oldTotal , 0, newSize - oldSize);
-		
+		struct JsGcKey** table = (struct JsGcKey**)realloc(JsGcKeyMan->table,newSize);
+		//刷新内存
+		for(i=oldTotal;i<newTotal;++i)
+			table[i] = NULL;
 		JsGcKeyMan->table = table;
 		JsGcKeyMan->total = newTotal;
 		//used 不变
 	}
 	//空间满足需求, 寻找第一个NULL的空间
-	keypp = (struct JsKey** ) JsGcKeyMan->table;
+	keypp = (struct JsGcKey** ) JsGcKeyMan->table;
 	size = JsGcKeyMan->total;
 	for( i = 0 ; i < size; ++i){
 		if(keypp[i]== NULL){
 			//申请空间
-			keypp[i] = (struct JsKey*)malloc(sizeof(struct JsKey));
+			keypp[i] = (struct JsGcKey*)malloc(sizeof(struct JsGcKey));
 			keypp[i]->key = key;
 			if(desc != NULL){
 				keypp[i]->desc = malloc(strlen(desc) + 4);
@@ -390,17 +462,15 @@ int JsGcRegistKey(void* key,const char* desc){
 /*Gc中删除一个Key , Key != 0, 并且删除RootTable中相关Root*/
 void JsGcBurnKey(void* key){
 	pthread_mutex_lock(JsGcLock);
-	//Gc工作期间, 不能再使用该API 
-	if(JsGcWorking == TRUE)
-		JsAssert(FALSE);
+
 	JsAssert(key != NULL);
-	struct JsKey** keypp ;
-	struct JsRoot** rootpp;
+	struct JsGcKey** keypp ;
+	struct JsGcRoot** rootpp;
 	int i,size;
 	
 	
 	//剔除KeyTable
-	keypp = (struct JsKey** ) JsGcKeyMan->table;
+	keypp = (struct JsGcKey** ) JsGcKeyMan->table;
 	size = JsGcKeyMan->total;
 	for(i=0 ; i < size ; ++i){
 		if(keypp[i] != NULL && keypp[i]->key == key){
@@ -417,7 +487,7 @@ void JsGcBurnKey(void* key){
 		}
 	}
 	//剔除RootTable中相关点
-	rootpp = (struct JsRoot**)JsGcRootMan->table;
+	rootpp = (struct JsGcRoot**)JsGcRootMan->table;
 	size = JsGcRootMan->total;
 	for(i=0 ; i < size ; ++i){
 		if(rootpp[i] != NULL && rootpp[i]->key == key){
@@ -439,18 +509,15 @@ void JsGcMountRoot(void* mp,void* key){
 
 	pthread_mutex_lock(JsGcLock);
 	JsAssert(key != NULL && mp != NULL);
-	//Gc工作期间, 不能再使用该API 
-	if(JsGcWorking == TRUE)
-		JsAssert(FALSE);
 		
-	struct JsKey** keypp ;
-	struct JsRoot** rootpp;
+	struct JsGcKey** keypp ;
+	struct JsGcRoot** rootpp;
 	int i,size;
 	int flag ;
 	
 	//查询KeyTable中是否存在key
 	flag = FALSE;
-	keypp = (struct JsKey** ) JsGcKeyMan->table;
+	keypp = (struct JsGcKey** ) JsGcKeyMan->table;
 	size = JsGcKeyMan->total;
 	for(i=0 ; i < size ; ++i){
 		if(keypp[i] != NULL && keypp[i]->key == key){
@@ -463,7 +530,7 @@ void JsGcMountRoot(void* mp,void* key){
 	JsAssert(flag);
 	
 	//查询RootTable中是否存在 (key,mp)
-	rootpp = (struct JsRoot**)JsGcRootMan->table;
+	rootpp = (struct JsGcRoot**)JsGcRootMan->table;
 	size = JsGcRootMan->total;
 	flag = FALSE;
 	for(i=0 ; i < size ; ++i){
@@ -487,93 +554,68 @@ void JsGcMountRoot(void* mp,void* key){
 		int newTotal =  oldTotal * 2;
 		
 		//重新配置table空间大小
-		int oldSize = sizeof(struct JsRoot*) * oldTotal;
-		int newSize = sizeof(struct JsRoot*) * newTotal;
+		//int oldSize = sizeof(struct JsGcRoot*) * oldTotal;
+		int newSize = sizeof(struct JsGcRoot*) * newTotal;
 		
 		//重新申请
-		void* table = realloc(JsGcRootMan->table,newSize);
-		//刷新新申请空间
-		memset(table + oldTotal , 0, newSize - oldSize);
-		
+		struct JsGcRoot** table = (struct JsGcRoot**)realloc(JsGcRootMan->table,newSize);
+		//刷新新申请位置
+		for(i=oldTotal;i<newTotal;++i)
+			table[i]=NULL;
 		JsGcRootMan->table = table;
 		JsGcRootMan->total = newTotal;
 		//used 不变
 	}
 	//空间满足需求, 寻找第一个NULL的空间
-	rootpp = (struct JsRoot**)JsGcRootMan->table;
+	rootpp = (struct JsGcRoot**)JsGcRootMan->table;
 	size = JsGcRootMan->total;
 	for(i=0 ; i < size ; ++i){
 		if(rootpp[i] == NULL){
-			rootpp[i] = (struct JsRoot*)malloc(sizeof(struct JsRoot));
+			rootpp[i] = (struct JsGcRoot*)malloc(sizeof(struct JsGcRoot));
 			rootpp[i]->mp = mp;
 			rootpp[i]->key = key;
 			break;
 		}
 	}
 	//被使用空间++
-	JsGcKeyMan->used ++;
+	JsGcRootMan->used ++;
 	
 	pthread_mutex_unlock(JsGcLock);
 
 }
-
-/*
-	挂起线程等待Gc结束:
-		调用TrapGc的时候, 检测到需要进行Gc, 则调用该函数, 完成等待Gc
-	前需要完成的工作, fn = NULL , 则表示没有要做的
-*/
-void JsGcTrap(JsGcTrapFn fn,void* data){
-	
-	pthread_mutex_lock(JsGcLock);
-	//Gc工作期间, 不能再使用该API 
-	if(JsGcWorking == TRUE)
-		JsAssert(FALSE);
-		
-	int line = JsGcMemory / 1024;
-	if(JsGcReqed == TRUE ||line >= JS_GC_MEMORY_LINE){
-		//标记为请求GC
-		JsGcReqed = TRUE;
-		pthread_mutex_unlock(JsGcLock);
-		//调用进入Gc前准备函数
-		if(fn!=NULL)
-			(*fn)(data);
-		//等待Gc完成的信号
-		pthread_mutex_lock(&JsGcTrapLock);
-		pthread_cond_wait(&JsGcTrapCond, &JsGcTrapLock);
-		pthread_mutex_unlock(&JsGcTrapLock);
-	}else{
-		//不需要GC
-		pthread_mutex_unlock(JsGcLock);
-	}
+void JsGcCommit(){
+	struct JsGcTlsNode* node = (struct JsGcTlsNode*)pthread_getspecific(*JsGcTlsKey);
+	if(node == NULL)
+		return;
+	JsGcCommit0(node);
 }
 /*-------------------------------------------------------------------*/
-static int JsHashInsert(void* mp){
+
+static int JsGcMpInsert(struct JsGcHtNode** table,void* mp){
 	JsAssert(mp != NULL);
-	int hashCode = JsHashCode(mp);
+	int hashCode = JsGcHashCode(mp);
 	//新节点空间
-	struct JsHtNode* nodep = (struct JsHtNode*)malloc(sizeof(struct JsHtNode));
-	nodep->mark = FALSE;
-	nodep->next = NULL;
-	nodep->mp = mp;
+	struct JsGcHtNode* nodep = (struct JsGcHtNode*)malloc(sizeof(struct JsGcHtNode));
 	
-	struct JsHtNode** nodepp = &JsGcHashTable[hashCode];
-	//最后位置
-	while(*nodepp != NULL){
-		nodepp = &(*nodepp)->next;
-	}
-	*nodepp = nodep;
+	nodep->count = 0;
+	//插入到Hashtable 第一个位置
+	nodep->next = table[hashCode];
+	table[hashCode] = nodep;
+	
+	nodep->mp = mp;
+
 	return TRUE;
 }
 /*将mp从hashTable中删除*/
-static int JsHashRemove(void* mp){
+static int JsGcMpRemove(struct JsGcHtNode** table,void* mp){
 	JsAssert(mp != NULL);
-	int hashCode = JsHashCode(mp);
-	struct JsHtNode** nodepp = &JsGcHashTable[hashCode];
+	int hashCode = JsGcHashCode(mp);
+	struct JsGcHtNode** nodepp = &table[hashCode];
 	while(*nodepp != NULL ){
 		if((*nodepp)->mp == mp){
 			//记录要删除的node对象
-			struct JsHtNode* nodep = (*nodepp);
-			//找到该对象
+			struct JsGcHtNode* nodep = (*nodepp);
+			//修改prev ~ next 关系
 			(*nodepp) = (*nodepp)->next;
 			free(nodep);
 			break;
@@ -583,10 +625,10 @@ static int JsHashRemove(void* mp){
 	return TRUE;
 }
 
-static struct JsHtNode* JsFindHtNode(void* mp){
+static struct JsGcHtNode* JsGcFindHtNode(struct JsGcHtNode** table,void* mp){
 	JsAssert(mp != NULL);
-	int hashCode = JsHashCode(mp);
-	struct JsHtNode** nodepp = &JsGcHashTable[hashCode];
+	int hashCode = JsGcHashCode(mp);
+	struct JsGcHtNode** nodepp = &table[hashCode];
 	while(*nodepp != NULL ){
 		if((*nodepp)->mp == mp){
 			return *nodepp;
@@ -595,7 +637,7 @@ static struct JsHtNode* JsFindHtNode(void* mp){
 	}
 	return NULL;
 }
-static int JsHashCode(void* mp){
+static int JsGcHashCode(void* mp){
 	if(mp == NULL)
 		return 0;
 	char buf[128];
@@ -603,44 +645,142 @@ static int JsHashCode(void* mp){
 	char* pEnd;
 	int code;
 	code = strtol(buf,&pEnd,0);
-	code %= JS_HASH_TABLE_SIZE;
+	code %= JS_GC_HASH_TABLE_SIZE;
 	return code;
 }
 
-static void JsUnMarkHtNode(){
+
+//Gc线程
+static void* JsGcThread(void* data){
+	struct JsGcTlsNode** tlspp;
+	while(1){
+		
+		pthread_mutex_lock(JsGcLock);
+		//Gc阶段表示
+		JsGcStage = TRUE;
+		//锁住所有tls
+		tlspp = &JsGcTlsList;
+		while(*tlspp != NULL){
+			pthread_mutex_lock((*tlspp)->lock);
+			//pthread_kill((*tlspp)->tid,SIGUSR1);
+			tlspp = &(*tlspp)->next;
+		}
+		//内存到达临界点
+		unsigned int mem = JsGcMemory;
+		tlspp = &JsGcTlsList;
+		while(*tlspp != NULL){
+			mem += (*tlspp)->size;
+			tlspp = &(*tlspp)->next;
+		}
+		printf("Alloced Mem : %d \n", mem);
+		if(mem >= JS_GC_MEMORY_LINE*1024){
+			printf("Do Gc Work...\n");
+			//内存到达临界点
+			JsGcWork();
+			printf("Finish Gc Work...\n");
+		}
+		
+		
+		//解锁所有tls
+		tlspp = &JsGcTlsList;
+		while(*tlspp != NULL){
+			pthread_mutex_unlock((*tlspp)->lock);
+			tlspp = &(*tlspp)->next;
+		}
+		//GC结束
+		JsGcStage = FALSE;
+		pthread_mutex_unlock(JsGcLock);
+		
+		//休眠该线程
+		sleep(JS_GC_SLEEP);
+	}
+	return NULL;
+};
+/*
+	当进行Gc的时候, 所有的内存申请(除GC线程)都会被锁在JsGcLock处.
+*/
+static void JsGcWork(){
+
+	//所有开启Gc功能的线程, 进行STOP
+	struct JsGcTlsNode** tlspp;
+	tlspp = &JsGcTlsList;
+	//Tls Table
+	while(*tlspp != NULL){
+		pthread_kill((*tlspp)->tid,SIGUSR1);
+		tlspp = &(*tlspp)->next;
+	}
+	
+	//刷新count=-1 的内存标记为0, 进入mark环节, 对于0+的内存快
+	//则不能重新计数
+	tlspp = &JsGcTlsList;
+	//Tls Table
+	while(*tlspp != NULL){
+		JsGcRefreshHtNode((*tlspp)->table);
+		tlspp = &(*tlspp)->next;
+	}
+	//Main Table
+	JsGcRefreshHtNode(JsGcMainHt);
+
+	int i ;
+	struct JsGcRoot** rootpp = (struct JsGcRoot**)JsGcRootMan->table;
+	for(i = 0 ; i < JsGcRootMan->total ; ++i){
+		if(rootpp[i] != NULL){
+			JsGcMark(rootpp[i]->mp);
+		}
+	}
+	//free
+	JsGcFreeMainHtNode();
+
+	//通知所有进程可以进行继续工作了
+	pthread_cond_broadcast(&JsGcStopCond);
+
+}
+
+static void JsGcRefreshHtNode(struct JsGcHtNode** table){
 	int i;
-	struct JsHtNode* nodep = NULL;
-	for(i=0;i<JS_HASH_TABLE_SIZE;++i){
-		nodep = JsGcHashTable[i];
-		while(nodep!=NULL){
-			nodep->mark = FALSE;
+	struct JsGcHtNode* nodep = NULL;
+	for(i=0;i<JS_GC_HASH_TABLE_SIZE;++i){
+		nodep = table[i];
+		while(nodep!=NULL && nodep->count == -1){
+			nodep->count = 0;
 			nodep = nodep->next;
 		}
 	}
 }
 /*释放节点, 和关联的mp 空间*/
-static void JsFreeUnMarkHtNode(){
+static void JsGcFreeMainHtNode(){
 	int i;
-	struct JsHtNode** nodepp = NULL;
-	for(i=0;i<JS_HASH_TABLE_SIZE;++i){
-		nodepp = &JsGcHashTable[i];
+	struct JsGcHtNode** nodepp = NULL;
+	for(i=0;i<JS_GC_HASH_TABLE_SIZE;++i){
+		nodepp = &JsGcMainHt[i];
 		while(*nodepp != NULL){
-			if((*nodepp)->mark == FALSE){
-				
-				void* mp = (*nodepp)->mp;
-				struct JsHtNode* nodep = *nodepp;
-				struct JsBlock* bp ;
-				JS_MP2BP(mp,bp);
-				//减少空间记录
-				JsGcMemory -= bp->size;
-				//调用该空间的释放函数
-				if(bp->freeFn!=NULL)
-					(*bp->freeFn)(mp);
-				//释放内存
-				free(bp);
-				free(nodep);
-				//修改nodepp,指向该节点的下一个位置
-				*nodepp = (*nodepp)->next;
+			if((*nodepp)->count != -1){
+				//对于未命中的节点++
+				(*nodepp)->count++;
+				//printf("The Node %p Miss: %d \n",(*nodepp),(*nodepp)->count);
+				if((*nodepp)->count >= JS_GC_MISS){
+					
+					//符合释放条件, 则释放内存
+					void* mp = (*nodepp)->mp;
+					struct JsGcHtNode* nodep = *nodepp;
+					struct JsGcBlock* bp ;
+					//删除以该地址为Key的条目(TRY，可能不是Key)
+					JsGcBurnKey(mp);
+					JS_MP2BP(mp,bp);
+					//减少空间记录
+					JsGcMemory -= bp->size;
+					//调用该空间的释放函数
+					if(bp->freeFn!=NULL)
+						(*bp->freeFn)(mp,bp->size);
+					//释放内存
+					free(bp);
+					free(nodep);
+					//修改nodepp,指向该节点的下一个位置
+					*nodepp = (*nodepp)->next;
+				}else{
+					//未到回收标准, 等待下一次回收
+					nodepp = &(*nodepp)->next;
+				}
 			}else{
 				//节点被mark, 说明不需要释放, 直接跳到下一个节点
 				nodepp = &(*nodepp)->next;
@@ -649,108 +789,173 @@ static void JsFreeUnMarkHtNode(){
 	}
 
 }
-//Gc线程
-static void* JsGcThread(void* data){
-	while(1){
-		//检测是否已经请求Gc操作
-		if(JsGcReqed == TRUE){
-			pthread_mutex_lock(JsGcLock);
-			//检测VM->engines的状态是否符合条件
-			struct JsVm* vm =  JsGetVm();
-			pthread_mutex_lock((pthread_mutex_t*)vm->lock);
-			int size = JsListSize(vm->engines);
-			int i;
-			int flag = TRUE;
-			for( i = 0; i < size ; ++i){
-				struct JsEngine* e = JsListGet(vm->engines,i);
-				if(!(e->state == JS_ENGINE_IDLE || e->state == JS_ENGINE_GC)){
-					// 存在一个不可以回收的Engine状态
-					flag = FALSE;
-					break;
-				}
+void JsGcCommit0(struct JsGcTlsNode* node){
+	if(node == NULL)
+		return;
+	pthread_mutex_lock(JsGcLock);
+	//获取Tls对象
+	pthread_mutex_lock(node->lock);
+	struct JsGcHtNode **tlsHt  = node->table;
+	struct JsGcHtNode **mainHt = JsGcMainHt;
+	int i;
+	for(i=0;i<JS_GC_HASH_TABLE_SIZE;++i){
+		//归类同hashcode的MemNode
+		if(tlsHt[i] != NULL){
+			struct JsGcHtNode *  mp = mainHt[i];
+			struct JsGcHtNode ** mpp = &tlsHt[i];
+			//查询到TlsHt[i]的最后一项
+			while((*mpp)->next != NULL){
+				mpp = &(*mpp)->next;
 			}
-			if(flag){
-				//进行Gc工作
-				JsGcDoWork();
-			}
-			pthread_mutex_unlock((pthread_mutex_t*)vm->lock);
-			pthread_mutex_unlock(JsGcLock);
-		}
-		//休眠该线程
-		sleep(1);
-	}
-	return NULL;
-};
-/*
-	当进行Gc的时候, 所有的内存申请(除GC线程)都会被锁在JsGcLock处.
-*/
-static void JsGcDoWork(){
-	//开始工作
-	JsGcWorking = TRUE;
-	
-	//刷新HashTable
-	JsUnMarkHtNode();
-	//mark
-	int i ;
-	struct JsRoot** rootpp = (struct JsRoot**)JsGcRootMan->table;
-	for(i = 0 ; i < JsGcRootMan->total ; ++i){
-		if(rootpp[i] != NULL){
-			JsGcDoMark(rootpp[i]->mp);
+			//指向mainHt[i]原先的表项
+			(*mpp)->next = mp;
+			//设置mainHt[i]为TlsHt[i]的对象
+			mainHt[i] = tlsHt[i];
+			//清空表项
+			tlsHt[i] = NULL;
 		}
 	}
-	//free
-	JsFreeUnMarkHtNode();
+	//刷入Tls中申请内存大小, 并设置大小为0
+	JsGcMemory += node->size;
+	node->size = 0;
+	pthread_mutex_unlock(node->lock);
+	pthread_mutex_unlock(JsGcLock);
+}
+
+
+
+/*收到Gc信号(USR1)的时候, 调用的函数, 停止线程, 并且等待Gc结束(cond)*/
+static void JsGcSigHandler(int sig){
+	pthread_mutex_lock(JsGcStopLock);
+	pthread_cond_wait(&JsGcStopCond,JsGcStopLock);
+	pthread_mutex_unlock(JsGcStopLock);
+}
+static void JsGcTBegin(){
+	JsGcBtTls();
+}
+static void JsGcBtTls(){
+	struct JsGcTlsNode*  node = (struct JsGcTlsNode*)pthread_getspecific(*JsGcTlsKey);
+	if(node != NULL){
+		//已经初始化过了, 直接返回
+		return;
+	}
+	pthread_mutex_lock(JsGcLock);
+	//申请HashTable空间
+	struct JsGcHtNode** table = (struct JsGcHtNode**) malloc(sizeof(struct JsGcHtNode*) * JS_GC_HASH_TABLE_SIZE);
+	//清空
+	memset(table,0,sizeof(struct JsGcHtNode*) * JS_GC_HASH_TABLE_SIZE);
+
+	node = (struct JsGcTlsNode* )malloc(sizeof(struct JsGcTlsNode));
+	node->tid = pthread_self();
+	node->table = table;
+	node->size = 0;
+	//配置计数锁
+	node->lock = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
+	pthread_mutexattr_t lockAttr;
+	pthread_mutexattr_setpshared(&lockAttr, PTHREAD_PROCESS_PRIVATE);
+	pthread_mutexattr_settype(&lockAttr ,PTHREAD_MUTEX_RECURSIVE);
+	pthread_mutex_init(node->lock,&lockAttr);
 	
-	//收尾工作
-	JsGcWorking = FALSE;
-	//取消req标记
-	JsGcReqed = FALSE;
-	//通知所有进程可以进行继续工作了
-	pthread_cond_broadcast(&JsGcTrapCond);
+	//放在 JsGcTlsList 第一个位置
+	node->next = JsGcTlsList;
+	JsGcTlsList = node;
+	//加入到TLS中
+	pthread_setspecific(*JsGcTlsKey,node);
+	pthread_mutex_unlock(JsGcLock);
+}
+/*线程退出, JsGcHtKey的后置函数*/
+static void JsGcEtTls(void *data){
+	//data 可以等于NULL
+	pthread_mutex_lock(JsGcLock);
+	//把Tls中HtTable的数据和大小刷入主存
+	JsGcCommit0((struct JsGcTlsNode*)data);
+	//删除JsGcTlsList的该TID的点
+	pthread_t tid = pthread_self();
+	struct JsGcTlsNode** pp = &JsGcTlsList;
+	while(*pp!=NULL){
+		if((*pp)->tid == tid){
+			struct JsGcTlsNode* p = *pp;
+			//节点重新链接
+			*pp =  (*pp)->next;
+			//释放该内存
+			free(p->table);
+			//锁释放
+			pthread_mutex_destroy(p->lock);
+			free(p->lock);
+			free(p);
+			break;
+		}
+		//选择下一个节点
+		pp =  &(*pp)->next;
+	}
+	pthread_mutex_unlock(JsGcLock);
 }
 
 //模块初始化API
 static void JsPrevInitGc(){
 	void* table = NULL;
 	int size = 0;
-	//初始化JsKeyMan
-	JsGcKeyMan = (struct JsMan*)malloc(sizeof(struct JsMan));
-	JsGcKeyMan->total = JS_KEY_TABLE_SIZE;
+	//初始化JsGcKeyMan
+	JsGcKeyMan = (struct JsGcMan*)malloc(sizeof(struct JsGcMan));
+	JsGcKeyMan->total = JS_GC_KEY_TABLE_SIZE;
 	JsGcKeyMan->used =  0;
 	
-	size = sizeof(struct JsKey*) * JS_KEY_TABLE_SIZE;
+	size = sizeof(struct JsGcKey*) * JS_GC_KEY_TABLE_SIZE;
 	table = malloc(size);
 	memset(table,0,size);
 	JsGcKeyMan->table = table;
 	
-	//初始化JsRootMan
-	JsGcRootMan = (struct JsMan*)malloc(sizeof(struct JsMan));
-	JsGcRootMan->total = JS_ROOT_TABLE_SIZE;
+	//初始化JsGcRootMan
+	JsGcRootMan = (struct JsGcMan*)malloc(sizeof(struct JsGcMan));
+	JsGcRootMan->total = JS_GC_ROOT_TABLE_SIZE;
 	JsGcRootMan->used = 0;
 	
-	size = sizeof(struct JsRoot*) * JS_ROOT_TABLE_SIZE;
+	size = sizeof(struct JsGcRoot*) * JS_GC_ROOT_TABLE_SIZE;
 	table = malloc(size);
 	memset(table,0,size);
 	JsGcRootMan->table = table;
 	
 	//初始化HashTable
-	memset(JsGcHashTable,0,sizeof(struct JsHtNode*) * JS_HASH_TABLE_SIZE);
+	memset(JsGcMainHt,0,sizeof(struct JsGcHtNode*) * JS_GC_HASH_TABLE_SIZE);
 	
-	//初始化JsGcLock, 配置一个计数类型的Lock
-	JsGcLock = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
 
+	//计数锁属性
 	pthread_mutexattr_t lockAttr;
 	pthread_mutexattr_setpshared(&lockAttr, PTHREAD_PROCESS_PRIVATE);
 	pthread_mutexattr_settype(&lockAttr ,PTHREAD_MUTEX_RECURSIVE);
-
+	
+	//初始化JsGcLock, 配置一个计数类型的Lock
+	JsGcLock = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
 	pthread_mutex_init(JsGcLock,&lockAttr);
 	
-}
-static void JsPostInitGc(){
+	//初始化JsGcStopLock为计数类型Lock
+	JsGcStopLock = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
+	pthread_mutex_init(JsGcStopLock,&lockAttr);
+	
+	//初始化HashTable Tls Key
+	JsGcTlsKey =(pthread_key_t*) malloc(sizeof(pthread_key_t));
+	pthread_key_create(JsGcTlsKey, &JsGcEtTls);
 
+
+	
+	//设置GC信号量
+	struct sigaction act, oldact;
+	act.sa_handler = JsGcSigHandler;
+	sigfillset(&act.sa_mask);
+	act.sa_flags = 0; //不可打断类型
+	sigaction(SIGUSR1, &act, &oldact);
+	
+	//开启主线程Gc功能
+	JsGcTBegin();
+	
+}
+
+static void JsPostInitGc(){
+	
+	
 	//struct sched_param sched;
-	//sched.sched_priority = 3;
-	pthread_t  pid  ;
+	//sched.sched_priority = 18;//正常为20
+	pthread_t pid;
 	int err = pthread_create(&pid,NULL,&JsGcThread,NULL);
 	//低优先级
 	//pthread_setschedparam( pid, SCHED_RR,&sched );
@@ -759,7 +964,6 @@ static void JsPostInitGc(){
 		JsAssert(FALSE);
 	}
 }
-
 /*************************锁模块*********************/
 
 //配置一个程序内部使用, 可以计数的锁的属性
@@ -767,11 +971,12 @@ static pthread_mutexattr_t* JsLockAttr = NULL;
 static void JsPrevInitLock();
 static void JsInitLockAttr();
 
+static void JsGcFreeLock(void* mp,int size);
 /*--------------------------------------------------*/
 
 
 JsLock JsCreateLock(){
-	pthread_mutex_t* a = (pthread_mutex_t*) JsMalloc(sizeof(pthread_mutex_t));
+	pthread_mutex_t* a = (pthread_mutex_t*) JsGcMalloc(sizeof(pthread_mutex_t),NULL,&JsGcFreeLock);
 	pthread_mutex_init(a,JsLockAttr);
 	return a;
 }
@@ -783,37 +988,49 @@ void JsUnlock(JsLock lock){
 	JsAssert(lock != NULL);
 	pthread_mutex_unlock((pthread_mutex_t*)lock);  
 }
-void JsDestroyLock(JsLock* lock){
-	if(lock == NULL || *lock == NULL)
-		return;
-	pthread_mutex_t** p = (pthread_mutex_t**)lock;
-	pthread_mutex_destroy(*p);
-	*lock = NULL;
-}
 /*--------------------------------------------------*/
 static void JsInitLockAttr(){
-	JsLockAttr = (pthread_mutexattr_t*) JsMalloc(sizeof(pthread_mutexattr_t));
+	JsLockAttr = (pthread_mutexattr_t*) JsGcMalloc(sizeof(pthread_mutexattr_t),NULL,NULL);
 	pthread_mutexattr_init(JsLockAttr);
 	pthread_mutexattr_setpshared(JsLockAttr, PTHREAD_PROCESS_PRIVATE);
 	pthread_mutexattr_settype(JsLockAttr ,PTHREAD_MUTEX_RECURSIVE);
+	//挂为Root
+	JsGcRegistKey(JsLockAttr,"LockAttr");
+	JsGcMountRoot(JsLockAttr,JsLockAttr);
 }
 static void JsPrevInitLock(){
 	JsInitLockAttr();	
 };
 
-
+static void JsGcFreeLock(void* mp,int size){
+	pthread_mutex_t* lock = (pthread_mutex_t*)mp;
+	pthread_mutex_destroy(lock);
+}
 
 
 /********************************线程模块*****************************/
+//代理函数的pass数据
+struct JsProxyData{
+	JsThreadFn fn;
+	void* data;
+};
+//主要目的是开启子线程的GC功能
+static void* JsProxyThread(void* data);
+
 //返回线程相关信息
 JsThread JsCurThread(){
-	pthread_t* p = (pthread_t *)JsMalloc(sizeof(pthread_t));
+	pthread_t* p = (pthread_t *)JsGcMalloc(sizeof(pthread_t),NULL,NULL);
 	*p = pthread_self();
 	return p;
 }
 JsThread JsStartThread(JsThreadFn fn,void* data){
-	pthread_t* p = (pthread_t *)JsMalloc(sizeof(pthread_t));
-	int err = pthread_create(p,NULL,fn,data); 
+	pthread_t* p = (pthread_t *)JsGcMalloc(sizeof(pthread_t),NULL,NULL);
+	//代理函数, 内存由ProxyThread释放
+	struct JsProxyData* proxy = (struct JsProxyData*)malloc(sizeof(struct JsProxyData));
+	proxy->fn = fn;
+	proxy->data = data;
+	
+	int err = pthread_create(p,NULL,&JsProxyThread,proxy); 
 	if(err !=0){
 		return NULL;
 	}
@@ -846,10 +1063,21 @@ void JsHalt(){
 	exit(0);
 }
 
+
+static void* JsProxyThread(void* data){
+	//开启Gc功能的函数
+	JsGcTBegin();
+	struct JsProxyData* proxy = (struct JsProxyData*)data;
+	JsThreadFn pFn = proxy->fn;
+	void* pD = proxy->data;
+	//释放Proxy内存
+	free(data);
+	return (*pFn)(pD);
+}
 /****************************TLS 模块*******************************/
 /*把数据存储在当前TLS中*/
 JsTlsKey JsCreateTlsKey(JsTlsFn fn){
-	pthread_key_t * key = (pthread_key_t*)JsMalloc(sizeof(pthread_key_t));
+	pthread_key_t * key = (pthread_key_t*)JsGcMalloc(sizeof(pthread_key_t),NULL,NULL);
 	pthread_key_create( key, fn);
 	return key;
 }

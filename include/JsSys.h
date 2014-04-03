@@ -1,6 +1,7 @@
 #ifndef JsSysH
 #define JsSysH
 #include"JsType.h"
+/*该模块 占用了USR1的信号位, 其他模块不能再占用!*/
 struct JsVm;
 struct JsEngine;
 struct JsContext;
@@ -15,14 +16,6 @@ void JsPostInitSys();
 
 /***********************************内存管理模块 API*******************************/
 
-
-/*-------------------------兼容原有代码---------------------------------------*/
-/*真机内存 API*/
-void* JsMalloc(int size);
-void* JsReAlloc(void* mem,int newSize);
-
-
-/*----------------------------------GC 内存管理--------------------------------*/
 /*
 	委托到GC管理的内存中
 		size must > 0
@@ -30,6 +23,7 @@ void* JsReAlloc(void* mem,int newSize);
 		freeFn 为在回收该内存的时候, 执行的析构动作
 */
 void* JsGcMalloc(int size,JsGcMarkFn markFn,JsGcFreeFn freeFn);
+
 /*Gc空间realloc大小*/
 void* JsGcReAlloc(void* mp,int newSize);
 /*
@@ -39,15 +33,13 @@ void* JsGcReAlloc(void* mp,int newSize);
 		1 	: 先前标记过
 		-1	: 不在Gc管理的内存中
 	*一个属性是否被Mark到, 在于父容器是否对该属性所在的MP(内存地址)进行Mark
+	*该函数的运行时机为GC阶段, 非GC时段运行该函数会出错
 */
-int JsGcDoMark(void* mp);
-/*重新配置该内存指向的mark函数*/
-void JsGcSetMarkFn(void* mp,JsGcMarkFn markFn);
-/*重新配置该内存指向的free函数*/
-void JsGcSetFreeFn(void* mp,JsGcMarkFn freeFn);
+int JsGcMark(void* mp);
 /*
 	Gc中添加一个有效的Key类型(指针类型),Key != 0, 
-	注意该Key 仅仅是一个标识符, 无论是否指向有效内存.
+	当该Key指向的内存空间被回收的时候, 会导致该Key失效
+	也可以手动调用JsGcBurnKey()来销毁该Key
 	返回
 		0 : 已经存在该key
 		1 : 插入成功
@@ -57,25 +49,20 @@ int JsGcRegistKey(void* key,const char* desc);
 void JsGcBurnKey(void* key);
 /*Gc扫描的时候, Root节点配置*/
 void JsGcMountRoot(void* mp,void* key);
-/*
-		调用TrapGc的时候, 检测是否需要进行Gc, 则调用该函数, 完成等待Gc
-	前需要完成的工作, fn = NULL , 则表示没有要做的, data 为传递给fn的数据
-*/
-void JsGcTrap(JsGcTrapFn fn,void* data);
-
+/*提交当前线程内存到主存中*/
+void JsGcCommit();
 /****************************锁模块 API**********************************/
 /*锁 API*/
 JsLock JsCreateLock();
 void JsLockup(JsLock lock);
 void JsUnlock(JsLock lock);
-void JsDestroyLock(JsLock* lock);
 
 /*****************************线程模块API********************************/
 
 /*线程 API*/
 //返回线程相关信息
 JsThread JsCurThread();
-//启动线程
+/*通过该API启动的线程, 会添加GC特性*/
 JsThread JsStartThread(JsThreadFn fn,void* data);
 //自身线程安全退出
 void JsCloseSelf();

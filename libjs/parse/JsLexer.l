@@ -72,20 +72,20 @@
 "synchronized"  return tSYNCHRONIZED;
 
 [a-zA-Z_$][a-zA-Z_$0-9]*    {
-	yylval->string = (char*)JsMalloc(yyleng+1);
+	yylval->string = (char*)JsGcMalloc(yyleng+1,NULL,NULL);
 	strcpy(yylval->string,yytext);
     return tIDENT;
 }
 
 \"([^\"]|\\\")*\"           {
-	yylval->string = (char*)JsMalloc(yyleng-1);
+	yylval->string = (char*)JsGcMalloc(yyleng-1,NULL,NULL);
 	memcpy(yylval->string,yytext+1,yyleng-2);
 	yylval->string[yyleng-2] = '\0';
     return tSTRING;
 }
 
 \'([^\']|\\\')*\'           {
-	yylval->string = (char*)JsMalloc(yyleng-1);
+	yylval->string = (char*)JsGcMalloc(yyleng-1,NULL,NULL);
 	memcpy(yylval->string,yytext+1,yyleng-2);
 	yylval->string[yyleng-2] = '\0';
     return tSTRING;

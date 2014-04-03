@@ -40,29 +40,29 @@ void JsGlobalInit(struct JsVm* vm){
 	vm->Global->Class = "Global";
 	
 	//NaN
-	v = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	v = JsCreateValue();
 	v->type = JS_NUMBER;
 	v->u.number = JS_VALUE_NUMBER_NAN;
 	(*vm->Global->Put)(vm->Global,"NaN",v,JS_OBJECT_ATTR_STRICT);
 	//undefined
-	v = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	v = JsCreateValue();
 	v->type = JS_UNDEFINED;
 	(*vm->Global->Put)(vm->Global,"undefined",v,JS_OBJECT_ATTR_STRICT);
 	//eval
-	v = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	v = JsCreateValue();
 	v->type = JS_OBJECT;
 	v->u.object = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	v->u.object->Call = &JsGlobalEval;
 	(*vm->Global->Put)(vm->Global,"eval",v,JS_OBJECT_ATTR_STRICT);
 	//isNaN
-	v = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	v = JsCreateValue();
 	v->type = JS_OBJECT;
 	v->u.object = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	v->u.object->Call = &JsIsNaN;
 	(*vm->Global->Put)(vm->Global,"isNaN",v,JS_OBJECT_ATTR_STRICT);
 	
 	//setTimeout
-	v = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	v = JsCreateValue();
 	v->type = JS_OBJECT;
 	v->u.object = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	v->u.object->Call = &JsSetTimeout;
@@ -140,7 +140,7 @@ static void JsSetTimeout(struct JsObject *self, struct JsObject *thisobj, int ar
 
 	if(argc >= 2 && argv[0]->type == JS_OBJECT &&argv[0]->u.object != NULL && argv[0]->u.object->Call != NULL
 		&& argv[1]->type == JS_NUMBER &&argv[1]->u.number >=0 ){
-		int* data = (int*)JsMalloc(sizeof(int));
+		int* data = (int*)JsGcMalloc(sizeof(int),NULL,NULL);
 		*data = argv[1]->u.number;
 		JsNIO(&JsSetTimeoutWork,data,argv[0]->u.object,FALSE);
 	}else{

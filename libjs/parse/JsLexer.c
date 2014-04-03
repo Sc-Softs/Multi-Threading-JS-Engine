@@ -1386,7 +1386,7 @@ case 53:
 YY_RULE_SETUP
 #line 74 "JsLexer.l"
 {
-	yylval->string = (char*)JsMalloc(yyleng+1);
+	yylval->string = (char*)JsGcMalloc(yyleng+1,NULL,NULL);
 	strcpy(yylval->string,yytext);
     return tIDENT;
 }
@@ -1396,7 +1396,7 @@ case 54:
 YY_RULE_SETUP
 #line 80 "JsLexer.l"
 {
-	yylval->string = (char*)JsMalloc(yyleng-1);
+	yylval->string = (char*)JsGcMalloc(yyleng-1,NULL,NULL);
 	memcpy(yylval->string,yytext+1,yyleng-2);
 	yylval->string[yyleng-2] = '\0';
     return tSTRING;
@@ -1407,7 +1407,7 @@ case 55:
 YY_RULE_SETUP
 #line 87 "JsLexer.l"
 {
-	yylval->string = (char*)JsMalloc(yyleng-1);
+	yylval->string = (char*)JsGcMalloc(yyleng-1,NULL,NULL);
 	memcpy(yylval->string,yytext+1,yyleng-2);
 	yylval->string[yyleng-2] = '\0';
     return tSTRING;

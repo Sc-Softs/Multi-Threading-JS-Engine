@@ -35,7 +35,7 @@ void JsBooleanInit(struct JsVm* vm){
 	
 	JsBooleanFunctionInit(boolean,boolean_proto);
 	JsBooleanProtoInit(boolean,boolean_proto);
-	struct JsValue* v = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* v = JsCreateValue();
 	v->type = JS_OBJECT;
 	v->u.object = boolean;
 	(*vm->Global->Put)(vm->Global,"Boolean",v,JS_OBJECT_ATTR_STRICT);
@@ -49,7 +49,7 @@ static struct JsObject* JsCreateBooleanObject(struct JsObject* prototype,int boo
 	b->Class = "Boolean";
 	
 	//初始化自己的Sb
-	int* p = (int*)JsMalloc(sizeof(int));
+	int* p = (int*)JsGcMalloc(sizeof(int),NULL,NULL);
 	*p = (boolean != 0 ? TRUE:FALSE);
 	b->sb[JS_BOOLEAN_FLOOR] = p;
 	return b;
@@ -59,7 +59,7 @@ static struct JsObject* JsCreateBooleanObject(struct JsObject* prototype,int boo
 static void JsBooleanFunctionInit(struct JsObject* boolean,struct JsObject* boolean_proto){
 	boolean->Call = &JsBooleanConstCall;
 	boolean->Construct = &JsBooleanConstConstruct;
-	struct JsValue* v = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* v = JsCreateValue();
 	v->type = JS_OBJECT;
 	v->u.object = boolean_proto;
 	(*boolean->Put)(boolean,"prototype",v,JS_OBJECT_ATTR_STRICT);
@@ -88,20 +88,20 @@ static	void JsBooleanConstConstruct(struct JsObject *self, struct JsObject *this
 }
 static void JsBooleanProtoInit(struct JsObject* boolean,struct JsObject* boolean_proto){
 	
-	struct JsValue* p = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* p = JsCreateValue();
 	//Boolean.prototype.constructor
-	p= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	p= JsCreateValue();
 	p->type = JS_OBJECT;
 	p->u.object = boolean;
 	(*boolean_proto->Put)(boolean_proto,"constructor",p,JS_OBJECT_ATTR_DONTENUM);
 	//toString
-	p= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	p= JsCreateValue();
 	p->type = JS_OBJECT;
 	p->u.object = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	p->u.object->Call = &JsBooleanProtoToString;
 	(*boolean_proto->Put)(boolean_proto,"toString",p,JS_OBJECT_ATTR_DONTENUM);
 	//valueOf
-	p= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	p= JsCreateValue();
 	p->type = JS_OBJECT;
 	p->u.object = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	p->u.object->Call = &JsBooleanProtoValueOf;

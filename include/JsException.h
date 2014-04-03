@@ -47,7 +47,7 @@ struct JsValue;
 /*一个函数中mark都要不同*/
 #define JS_TRY(mark) \
 	int done##mark; \
-	jmp_buf* jmp_buf##mark = (jmp_buf*)JsMalloc(sizeof(jmp_buf)); \
+	jmp_buf* jmp_buf##mark = (jmp_buf*)JsGcMalloc(sizeof(jmp_buf),NULL,NULL); \
 	for(done##mark = 0; \
 	    done##mark == 0 && (setjmp(*jmp_buf##mark) == 0 ? \
 			(JsBuildDefender(jmp_buf##mark),1) : (JsOmitDefender(),0));  \

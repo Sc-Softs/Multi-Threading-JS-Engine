@@ -41,7 +41,7 @@ void JsStringInit(struct JsVm* vm){
 	
 	JsStringFunctionInit(str,str_proto);
 	JsStringProtoInit(str,str_proto);
-	struct JsValue* v = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* v = JsCreateValue();
 	v->type = JS_OBJECT;
 	v->u.object = str;
 	(*vm->Global->Put)(vm->Global,"String",v,JS_OBJECT_ATTR_STRICT);
@@ -55,13 +55,13 @@ static struct JsObject* JsCreateStringObject(struct JsObject* prototype,char* st
 	if(str == NULL)
 		str = "";
 	//初始化自己的Sb
-	char* p = (char*)JsMalloc(strlen(str)+4);
+	char* p = (char*)JsGcMalloc(strlen(str)+4,NULL,NULL);
 	strcpy(p,str);
 	string->sb[JS_STRING_FLOOR] = p;
 	
 	
 	//length
-	struct JsValue* vLength = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* vLength = JsCreateValue();
 	vLength->type = JS_NUMBER;
 	vLength->u.number = strlen(str);
 	(*string->Put)(string,"length",vLength,JS_OBJECT_ATTR_STRICT);
@@ -76,7 +76,7 @@ static struct JsObject* JsCreateStringObject(struct JsObject* prototype,char* st
 static void JsStringFunctionInit(struct JsObject* str,struct JsObject* str_proto){
 	str->Call = &JsStringConstCall;
 	str->Construct = &JsStringConstConstruct;
-	struct JsValue* v = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* v = JsCreateValue();
 	v->type = JS_OBJECT;
 	v->u.object = str_proto;
 	(*str->Put)(str,"prototype",v,JS_OBJECT_ATTR_STRICT);
@@ -106,32 +106,32 @@ static	void JsStringConstConstruct(struct JsObject *self, struct JsObject *thiso
 
 static void JsStringProtoInit(struct JsObject* str,struct JsObject* str_proto){
 	
-	struct JsValue* p = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* p = JsCreateValue();
 	//String.prototype.constructor
-	p= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	p= JsCreateValue();
 	p->type = JS_OBJECT;
 	p->u.object = str;
 	(*str_proto->Put)(str_proto,"constructor",p,JS_OBJECT_ATTR_DONTENUM);
 	//toString
-	p= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	p= JsCreateValue();
 	p->type = JS_OBJECT;
 	p->u.object = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	p->u.object->Call = &JsStringProtoToString;
 	(*str_proto->Put)(str_proto,"toString",p,JS_OBJECT_ATTR_DONTENUM);
 	//valueOf
-	p= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	p= JsCreateValue();
 	p->type = JS_OBJECT;
 	p->u.object = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	p->u.object->Call = &JsStringProtoValueOf;
 	(*str_proto->Put)(str_proto,"valueOf",p,JS_OBJECT_ATTR_DONTENUM);
 	//CharAt
-	p= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	p= JsCreateValue();
 	p->type = JS_OBJECT;
 	p->u.object = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	p->u.object->Call = &JsStringProtoCharAt;
 	(*str_proto->Put)(str_proto,"charAt",p,JS_OBJECT_ATTR_DONTENUM);
 	//Concat
-	p= (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	p= JsCreateValue();
 	p->type = JS_OBJECT;
 	p->u.object = JsCreateStandardFunctionObject(NULL,NULL,FALSE);
 	p->u.object->Call = &JsStringProtoConcat;
@@ -173,7 +173,7 @@ static	void JsStringProtoCharAt(struct JsObject *self, struct JsObject *thisobj,
 		res->u.string = "";
 	}else{
 		res->type =JS_STRING;
-		res->u.string = (char*)JsMalloc(4);
+		res->u.string = (char*)JsGcMalloc(4,NULL,NULL);
 		res->u.string[0] = v.u.string[(int)(pos.u.number)];
 		res->u.string[1] = '\0';
 	}
@@ -187,14 +187,14 @@ static	void JsStringProtoConcat(struct JsObject *self, struct JsObject *thisobj,
 	JsToString(&shell,&v);
 	r.type = JS_STRING;
 	int sizeOfMem = strlen(v.u.string)+4;
-	r.u.string = (char*)JsMalloc(sizeOfMem);
+	r.u.string = (char*)JsGcMalloc(sizeOfMem,NULL,NULL);
 	strcpy(r.u.string,v.u.string);
 	int i;
 	
 	for(i=0;i< argc;++i){
 		JsToString(argv[i],&v);
 		sizeOfMem += strlen(v.u.string);
-		r.u.string = (char*)JsReAlloc(r.u.string,sizeOfMem);
+		r.u.string = (char*)JsGcReAlloc(r.u.string,sizeOfMem);
 		strcat(r.u.string,v.u.string);
 	}
 	*res = r;
@@ -216,7 +216,7 @@ static	void JsStringInstGet(struct JsObject *self, char *prop,int* attr, struct 
 		}
 		res->type = JS_STRING;
 		
-		res->u.string = (char*)JsMalloc(4);
+		res->u.string = (char*)JsGcMalloc(4,NULL,NULL);
 		res->u.string[0] = p[index];
 		res->u.string[1] = '\0';
 		if(attr)

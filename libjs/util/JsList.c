@@ -13,8 +13,11 @@ struct JsNode{
 	void* data;
 };
 
+static void JsGcMarkNodeHead(void* mp, int ms);
+static void JsGcMarkNode(void* mp, int ms);
+
 JsList JsCreateList(){
-	return (JsList)JsMalloc(sizeof(struct JsNodeHead));
+	return (JsList)JsGcMalloc(sizeof(struct JsNodeHead),&JsGcMarkNodeHead,NULL);
 }
 
 
@@ -31,7 +34,7 @@ void JsListPush(void* head0,void* data){
 	for( i = 0 ; i < head->size; ++i){
 		npp = &(*npp)->next;
 	}
-	np = JsMalloc(sizeof(struct JsNode));
+	np = JsGcMalloc(sizeof(struct JsNode),&JsGcMarkNode,NULL);
 	np->data = data;
 	np->next = NULL;
 	(*npp) = np;
@@ -122,7 +125,7 @@ JsList JsListCopy(JsList dst,JsList src){
 	
 	for( i = 0 ; i < head->size ;++i){
 	
-		np = JsMalloc(sizeof(struct JsNode));
+		np = JsGcMalloc(sizeof(struct JsNode),&JsGcMarkNode,NULL);
 		np->data = (*npp1)->data;
 		np->next = NULL;
 		(*npp2) = np;
@@ -132,4 +135,15 @@ JsList JsListCopy(JsList dst,JsList src){
 	}
 	return p;
 
+}
+
+
+static void JsGcMarkNodeHead(void* mp, int ms){
+	struct JsNodeHead* p = (struct JsNodeHead*) mp;
+	JsGcMark(p->first);
+}
+static void JsGcMarkNode(void* mp, int ms){
+	struct JsNode* p = (struct JsNode*)mp;
+	JsGcMark(p->data);
+	JsGcMark(p->next);
 }

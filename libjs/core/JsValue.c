@@ -11,9 +11,13 @@
 #include<stdlib.h>
 #include<math.h>
 
+static void JsGcMarkValue(void* mp,int ms);
 
+struct JsValue* JsCreateValue(){
+	struct JsValue* value = (struct JsValue*)JsGcMalloc(sizeof(struct JsValue),&JsGcMarkValue,NULL);
+	return value;
 
-//------------------------
+}
 void JsToPrimitive(struct JsValue *val, int type, struct JsValue *res){
 					
 	if (val->type == JS_OBJECT)
@@ -95,7 +99,7 @@ void JsToNumber(struct JsValue *val, struct JsValue *res){
 }
 void JsToInteger(struct JsValue *val, struct JsValue *res){
 	JsToNumber(val, res);
-	if(res->type != JS_NUMBER);
+	if(res->type != JS_NUMBER)
 		return;
 	if (isnan(res->u.number))
 		res->u.number = 0.0;
@@ -157,7 +161,7 @@ void JsToString(struct JsValue *val, struct JsValue *res){
 		double value ;
 		value = val->u.number;
 		//最大长度为128位
-		buf = (char*)JsMalloc(128);
+		buf = (char*)JsGcMalloc(128,NULL,NULL);
 		if(value - (int)value == 0){
 			//整数
 			sprintf(buf,"%d",(int)value);
@@ -259,4 +263,29 @@ void JsPutValue(struct JsValue* v,struct JsValue* w,struct JsValue* res){
 	(*target->Put)(target, v->u.reference.name, w, JS_OBJECT_ATTR_DEFAULT);
 	res->u.boolean = TRUE;
 	return;
+}
+
+
+
+static void JsGcMarkValue(void* mp,int ms){
+	struct JsValue* value = (struct JsValue*)mp;
+	switch(value->type){
+	case JS_UNDEFINED: break;
+	case JS_NULL:break;
+	case JS_BOOLEAN: break;
+	case JS_NUMBER:break;
+	case JS_STRING:JsGcMark(value->u.string);break;
+	case JS_OBJECT: JsGcMark(value->u.object);break;
+	case JS_REFERENCE :{
+		JsGcMark(value->u.reference.base);
+		JsGcMark(value->u.reference.name);
+		}break;
+		
+	case JS_COMPLETION:{
+		JsGcMark(value->u.completion.value);
+		}break;
+	default:
+		//不存在该类型Value
+		JsAssert(FALSE);
+	}
 }

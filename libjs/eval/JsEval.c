@@ -237,7 +237,9 @@ static void JsFunctionCall(struct JsEngine* e,void* data,struct JsValue* res);
 		
 static void SyncBlockcStatement_eval(struct JsAstNode *na, 
         struct JsContext *context, struct JsValue *res);
-	
+
+//给JsValue* 类型数组的Mark
+static void JsGcMarkJsValueArray(void* mp, int ms);
 //JsAstClassEnum 对应的处理函数
 static void (*JsNodeClassEval[NODECLASS_MAX])(struct JsAstNode* ,
 	struct JsContext*,struct JsValue*) = {
@@ -251,7 +253,7 @@ static void (*JsNodeClassEval[NODECLASS_MAX])(struct JsAstNode* ,
     ,PrimaryExpression_ident_eval           /*PrimaryExpression_ident*/
     ,ArrayLiteral_eval                      /*ArrayLiteral*/
     ,ObjectLiteral_eval                     /*ObjectLiteral*/
-    ,Arguments_eval                         /*Arguments*/
+    ,NULL			                        /*Arguments 通过手动选择函数, 如CallException和NewMemberException*/
     ,MemberExpression_new_eval              /*MemberExpression_new*/
     ,MemberExpression_dot_eval              /*MemberExpression_dot*/
     ,MemberExpression_bracket_eval          /*MemberExpression_bracket*/
@@ -490,6 +492,7 @@ VariableDeclaration_eval(na, context, res)
 	//直接添加到当前Scope中
 	struct JsObject* top = (struct JsObject*)JsListGet(context->scope,JS_LIST_END);
 	(*top->Put)(top,n->var,&r3,context->varattr);
+	*res = r3;
 }
 /* 12.3 */
 static void
@@ -511,7 +514,7 @@ ExpressionStatement_eval(na, context, res)
 {
 	struct JsAstUnaryNode *n = CAST_NODE(na, JsAstUnaryNode);
 	struct JsValue r1;
-	struct JsValue *v = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue *v = JsCreateValue();
 
 	TRACE(na->location, context, JS_TRACE_STATEMENT);
 	EVAL(n->a, context, &r1);
@@ -805,7 +808,7 @@ ReturnStatement_eval(na, context, res)
 
 	TRACE(na->location, context, JS_TRACE_STATEMENT);
 	EVAL(n->expr, context, &r2);
-	v = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	v = JsCreateValue();
 	JsGetValue(&r2, v);
 	JS_SET_COMPLETION(res, JS_COMPLETION_RETURN, v);
 }
@@ -894,7 +897,7 @@ ThrowStatement_eval(na, context, res)
 	struct JsAstUnaryNode *n = CAST_NODE(na, JsAstUnaryNode);
 	struct JsValue r1, *r2;
 	
-	r2 = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	r2 = JsCreateValue();
 	
 	TRACE(na->location, context, JS_TRACE_STATEMENT);
 	EVAL(n->a, context, &r1);
@@ -1880,8 +1883,7 @@ AdditiveExpression_add_common(r2, r4, context, res)
 	}else{
 		JsToString(&r5, &r12);
 		JsToString(&r6, &r13);
-		s = (char*)JsMalloc(strlen(r12.u.string) 
-			+ strlen(r13.u.string) + 4);
+		s = (char*)JsGcMalloc(strlen(r12.u.string) + strlen(r13.u.string) + 4,NULL,NULL);
 		strcpy(s,r12.u.string);
 		strcat(s,r13.u.string);
 		res->type = JS_STRING;
@@ -2240,17 +2242,18 @@ CallExpression_eval(na, context, res)
 	struct JsValue *res;
 {
 	struct JsAstCallExpressionNode *n = CAST_NODE(na, JsAstCallExpressionNode);
-	struct JsValue r1, *args, **argv;
+	struct JsValue r1, **argv;
 	int argc, i;
 
 	EVAL(n->exp, context, &r1);
 	argc = n->args->argc;
 	if (argc > 0) {
-		args = (struct JsValue*)JsMalloc( sizeof(struct JsValue) * argc);
-		argv = (struct JsValue**)JsMalloc( sizeof(struct JsValue*) * argc);
-		Arguments_eval((struct JsAstNode *)n->args, context, args);
-		for (i = 0; i < argc; i++)
-			argv[i] = &args[i];
+		
+		argv = (struct JsValue**)JsGcMalloc( sizeof(struct JsValue*) * argc,&JsGcMarkJsValueArray,NULL);
+		for(i = 0 ; i < argc ;++i)
+			argv[i] = JsCreateValue();
+		//暂时切换指针类型
+		Arguments_eval((struct JsAstNode *)n->args, context,(struct JsValue*) argv);
 	}else 
 		argv = NULL;
 	CallExpression_eval_common(context, na->location, &r1, argc, argv, res);
@@ -2358,7 +2361,7 @@ MemberExpression_new_eval(na, context, res)
 {
 	struct JsAstMemberExpressionNewNode *n = 
 		CAST_NODE(na, JsAstMemberExpressionNewNode);
-	struct JsValue r1, r2, *args, **argv;
+	struct JsValue r1, r2, **argv;
 
 	int argc, i;
 
@@ -2367,11 +2370,11 @@ MemberExpression_new_eval(na, context, res)
 	
 	if (n->args) {
 		argc = n->args->argc;
-		args = (struct JsValue*)JsMalloc( sizeof(struct JsValue) * argc);
-		argv = (struct JsValue**)JsMalloc( sizeof(struct JsValue*) * argc);
-		Arguments_eval((struct JsAstNode *)n->args, context, args);
-		for (i = 0; i < argc; i++)
-			argv[i] = &args[i];
+	
+		argv = (struct JsValue**)JsGcMalloc( sizeof(struct JsValue*) * argc,&JsGcMarkJsValueArray,NULL);
+		for(i = 0 ; i < argc ;++i)
+			argv[i] = JsCreateValue();
+		Arguments_eval((struct JsAstNode *)n->args, context,(struct JsValue*) argv);
 	} else {
 		argc = 0;
 		argv = NULL;
@@ -2399,11 +2402,11 @@ Arguments_eval(na, context, res)
 	struct JsAstArgumentsNode *n = CAST_NODE(na, JsAstArgumentsNode);
 	struct JsAstArgumentsArg *arg;
 	struct JsValue v;
-
-	for (arg = n->first; arg; arg = arg->next) {
+	struct JsValue** argv = (struct JsValue**)res;
+	int i ;
+	for (i = 0 ,arg = n->first; arg; arg = arg->next, i++) {
 		EVAL(arg->expr, context, &v);
-		JsGetValue( &v, res);
-		res++;
+		JsGetValue( &v, argv[i]);
 	}
 }
 
@@ -2470,7 +2473,7 @@ ArrayLiteral_eval(na, context, res)
 			number /= 10;
 			bit++;
 		}
-		ind = (char*)JsMalloc(bit+4);
+		ind = (char*)JsGcMalloc(bit+4,NULL,NULL);
 		sprintf(ind,"%d",i);
 		//添加到Array中
 		(*res->u.object->Put)(res->u.object,ind,&elv,JS_OBJECT_ATTR_DEFAULT);
@@ -2549,7 +2552,7 @@ FunctionExpression_eval(na, context, res)
 	if(n->name != NULL){
 		//添加到当前Scope中
 		struct JsObject* top = (struct JsObject*)JsListGet(context->scope,JS_LIST_END);
-		struct JsValue* vFun = (struct JsValue* )JsMalloc(sizeof(struct JsValue));
+		struct JsValue* vFun = JsCreateValue();
 		vFun->type = JS_OBJECT;
 		vFun->u.object = fun;
 		//只读属性
@@ -2585,4 +2588,12 @@ FunctionBody_eval(na, context, res)
 	else
 		*res = *v.u.completion.value;
 }
+//给JsValue* 类型数组的Mark
+static void JsGcMarkJsValueArray(void* mp, int ms){
+	struct JsValue** array = (struct JsValue**)mp;
+	int size = (ms/sizeof(void*));
+	int i;
+	for(i=0;i<size;++i)
+		JsGcMark(array[i]);
 
+}

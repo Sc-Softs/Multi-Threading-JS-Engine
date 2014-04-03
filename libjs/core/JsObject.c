@@ -66,6 +66,20 @@ static struct JsObject* JsCreateActivationObject(struct JsObject* fun,int argc, 
 //创建一个Arguments对象
 static struct JsValue* JsCreateArguments(struct JsObject* fun,int argc, struct JsValue** argv);
 
+
+
+//struct JsObject
+static void JsGcMarkObject(void* mp,int ms);
+//void**
+static void JsGcMarkPbSb(void* mp,int ms);
+//JsFunction
+static void JsGcMarkFunction(void* mp,int ms);
+//struct JsStandardSelfBlock
+static void JsGcMarkStandardSelfBlock(void* mp,int ms);
+//struct JsProperty
+static void JsGcMarkProperty(void* mp,int ms);
+//struct JsIterator
+static void JsGcMarkIterator(void* mp,int ms);
 ////////////////////////////////////////////////////////////////////////////////////
 //构造一个JsObject的空间, floor 声明了pb 和 sb 数组的长度
 // RootObject为 0 即JsStandardObject所在的层数
@@ -75,10 +89,10 @@ struct JsObject* JsAllocObject(int floor){
 	}
 	floor ++;
 	struct JsObject* o;
-	o = (struct JsObject*)JsMalloc(sizeof(struct JsObject));
+	o = (struct JsObject*)JsGcMalloc(sizeof(struct JsObject),&JsGcMarkObject,NULL);
 	//数据槽
-	o->pb = (void**) JsMalloc(sizeof(void*) * floor );
-	o->sb = (void**) JsMalloc(sizeof(void*) * floor );
+	o->pb = (void**) JsGcMalloc(sizeof(void*) * floor,&JsGcMarkPbSb,NULL );
+	o->sb = (void**) JsGcMalloc(sizeof(void*) * floor,&JsGcMarkPbSb,NULL );
 	return o;
 }
 struct JsObject* JsCreateStandardObject(struct JsObject* o){
@@ -95,7 +109,7 @@ struct JsObject* JsCreateStandardSpecFunction(struct JsObject* o,JsList scope, i
 	
 	struct JsObject* obj = JsCreateBaseObject(o,TRUE,2,scope);
 	
-	struct JsFunction* function = (struct JsFunction* )JsMalloc(sizeof(struct JsFunction));
+	struct JsFunction* function = (struct JsFunction* )JsGcMalloc(sizeof(struct JsFunction),&JsGcMarkFunction,NULL);
 	//添加到sb
 	
 	((struct JsStandardSelfBlock*)obj->sb[JS_STANDARD_OBJECT_FLOOR])->function = function;
@@ -112,18 +126,18 @@ struct JsObject* JsCreateStandardSpecFunction(struct JsObject* o,JsList scope, i
 	
 	//配置prototype
 	struct JsObject* prototypeObj = JsCreateStandardObject(NULL);
-	struct JsValue* constructor = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* constructor = JsCreateValue();
 	constructor->type = JS_OBJECT;
 	constructor->u.object = obj;
 	(*prototypeObj->Put)(prototypeObj,"constructor",constructor,JS_OBJECT_ATTR_DONTENUM);
 	
 	//配置Function Object显示属性
-	struct JsValue* prototype = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* prototype = JsCreateValue();
 	prototype->type = JS_OBJECT;
 	prototype->u.object = prototypeObj;
 	(*obj->Put)(obj,"prototype",prototype,JS_OBJECT_ATTR_DONTDELETE);
 	
-	struct JsValue* length = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* length = JsCreateValue();
 	length->type = JS_NUMBER;
 	length->u.number = argc;
 	(*obj->Put)(obj,"length",length,JS_OBJECT_ATTR_STRICT);
@@ -139,7 +153,6 @@ static struct JsObject* JsCreateBaseObject(struct JsObject* o,int isf,int level,
 		obj = JsAllocObject(JS_STANDARD_OBJECT_FLOOR);
 	else
 		obj = o;
-	//pb = (struct JsObjectPb*)obj->pb[JS_STANDARD_OBJECT_FLOOR] = JsMalloc(sizeof(struct JsPb));
 	obj->Prototype = NULL;
 	obj->Class = NULL;
 	obj->SyncLock = JsCreateLock();
@@ -190,7 +203,7 @@ static struct JsObject* JsCreateBaseObject(struct JsObject* o,int isf,int level,
 	//构建PB
 	obj->pb[JS_STANDARD_OBJECT_FLOOR] = NULL;
 	//构建sb
-	sb = (struct JsStandardSelfBlock* )JsMalloc(sizeof(struct JsStandardSelfBlock));	
+	sb = (struct JsStandardSelfBlock* )JsGcMalloc(sizeof(struct JsStandardSelfBlock),&JsGcMarkStandardSelfBlock,NULL);	
 	sb->propertys = JsCreateList();	
 	sb->iterators = JsCreateList();
 	sb->lock = JsCreateLock();
@@ -269,7 +282,7 @@ void JsStandardPut(struct JsObject *self, char *prop, struct JsValue *val0, int 
 		return;
 	}
 	//拷贝指针指向的内存
-	struct JsValue* val = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* val = JsCreateValue();
 	*val = *val0;
 	size = JsListSize(sb->propertys);
 	for(i=0;i<size;++i){
@@ -282,7 +295,7 @@ void JsStandardPut(struct JsObject *self, char *prop, struct JsValue *val0, int 
 		}
 	}
 	//没有发现该属性, 则新添加一个新的属性
-	p = (struct JsProperty*)JsMalloc(sizeof(struct JsProperty));
+	p = (struct JsProperty*)JsGcMalloc(sizeof(struct JsProperty),JsGcMarkProperty,NULL);
 	p->name = prop;
 	p->value = val;
 	p->attr = flags;
@@ -454,7 +467,7 @@ char* JsStandardNextValue(struct JsObject** next, JsIter* piter,int initialized)
 	if(initialized == FALSE){
 		sb = (struct JsStandardSelfBlock*) (*next)->sb[JS_STANDARD_OBJECT_FLOOR];
 		JsLockup(sb->lock);
-		iter = (struct JsIterator*) JsMalloc(sizeof(struct JsIterator));
+		iter = (struct JsIterator*) JsGcMalloc(sizeof(struct JsIterator),&JsGcMarkIterator,NULL);
 		iter->useable = TRUE;
 		iter->pos = -1;
 		iter->size = JsListSize(sb->propertys);
@@ -603,7 +616,7 @@ static struct JsObject* JsCreateActivationObject(struct JsObject* fun, int argc,
 	}
 	//处理未被赋值的Params
 	for(;i<f->argc;++i){
-		struct JsValue* undef = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+		struct JsValue* undef = JsCreateValue();
 		(*activationObj->Put)(activationObj,f->argv[i],undef,JS_OBJECT_ATTR_DONTDELETE);
 	}
 	return activationObj;
@@ -611,12 +624,12 @@ static struct JsObject* JsCreateActivationObject(struct JsObject* fun, int argc,
 static struct JsValue* JsCreateArguments(struct JsObject* fun,int argc, struct JsValue** argv){
 	int i;
 	struct JsObject* argumentsObj = JsCreateStandardObject(NULL);
-	struct JsValue* length = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* length = JsCreateValue();
 	length->type = JS_NUMBER;
 	length->u.number = argc;
 	//length
 	(*argumentsObj->Put)(argumentsObj,"length",length,JS_OBJECT_ATTR_DONTENUM);
-	struct JsValue* callee = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* callee = JsCreateValue();
 	callee->type = JS_OBJECT;
 	callee->u.object = fun;
 	(*argumentsObj->Put)(argumentsObj,"callee",callee,JS_OBJECT_ATTR_DONTENUM);
@@ -630,12 +643,12 @@ static struct JsValue* JsCreateArguments(struct JsObject* fun,int argc, struct J
 			number /=10;
 			bit++;
 		}
-		char* buf = (char*)JsMalloc(bit + 4);
+		char* buf = (char*)JsGcMalloc(bit + 4,NULL,NULL);
 		sprintf(buf,"%d",i);
 		(*argumentsObj->Put)(argumentsObj,buf,argv[i],JS_OBJECT_ATTR_DONTENUM);
 	}
 	//构建JsValue
-	struct JsValue* arguments = (struct JsValue*)JsMalloc(sizeof(struct JsValue));
+	struct JsValue* arguments = JsCreateValue();
 	arguments->type = JS_OBJECT;
 	arguments->u.object  = argumentsObj;
 	return arguments;
@@ -685,4 +698,49 @@ void JsStandardHasInstance(struct JsObject *self, struct JsValue *instance,
 	//没有查询到
 	res->type = JS_BOOLEAN;
 	res->u.boolean = FALSE;
+}
+
+
+/****************Mark Fn********************/
+//GC期间mark该对象内属性的函数
+static void JsGcMarkObject(void* mp,int ms){
+	struct JsObject* o = (struct JsObject*)mp;
+	JsGcMark(o->Prototype);
+	//JsGcMark(o->Class);
+	JsGcMark(o->SyncLock);
+	JsGcMark(o->Scope);
+	JsGcMark(o->pb);
+	JsGcMark(o->sb);
+}
+static void JsGcMarkPbSb(void* mp,int ms){
+	void** array = (void**)mp;
+	int size = (ms/sizeof(void*));
+	int i;
+	for(i = 0 ; i < size  ; ++ i)
+		JsGcMark(array[i]);
+}
+static void JsGcMarkFunction(void* mp,int ms){
+	struct JsFunction* f = (struct JsFunction*)mp;
+	JsGcMark(f->argv);
+	JsGcMark(f->data);
+	JsGcMark(f->name);
+	JsGcMark(f->fSyncLock);
+}
+static void JsGcMarkStandardSelfBlock(void* mp,int ms){
+	struct JsStandardSelfBlock* sb = (struct JsStandardSelfBlock*)mp;
+	JsGcMark(sb->propertys);
+	JsGcMark(sb->iterators);
+	JsGcMark(sb->lock);
+	JsGcMark(sb->function);
+}
+//struct JsProperty
+static void JsGcMarkProperty(void* mp,int ms){
+	struct JsProperty* p = (struct JsProperty*)mp;
+	JsGcMark(p->name);
+	JsGcMark(p->value);
+}
+//struct JsIterator
+static void JsGcMarkIterator(void* mp,int ms){
+	struct JsIterator* i = (struct JsIterator*)mp;
+	JsGcMark(i->obj);
 }

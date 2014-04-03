@@ -3,12 +3,22 @@
 #include"JsContext.h"
 #include"JsValue.h"
 #include"JsObject.h"
+#include"JsSys.h"
 #include"JsVm.h"
 #include"JsList.h"
 #include<stdio.h>
 #include<stdlib.h>
 #include<stdarg.h>
 #include<assert.h>
+
+static void JsGcMarkLocation(void* mp,int ms);
+
+struct JsLocation* JsCreateLocation(char* filename,int lineno){
+	struct JsLocation* l = (struct JsLocation* )JsGcMalloc(sizeof(struct JsLocation),&JsGcMarkLocation,NULL);
+	l->filename  = filename;
+	l->lineno = lineno;
+	return l;
+}
 void JsPrintString(char* fmt,...){
 
 	va_list args;
@@ -68,4 +78,10 @@ void JsPrintStack(JsList stack){
 }
 void JsAssert(int v){
 	assert(v);
+}
+
+
+static void JsGcMarkLocation(void* mp,int ms){
+	struct JsLocation* l = (struct JsLocation*)mp;
+	JsGcMark(l->filename);
 }

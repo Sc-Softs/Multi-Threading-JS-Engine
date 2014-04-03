@@ -19,10 +19,11 @@ struct JsTaskComp{
 	void* data;
 };
 //当前线程的engine对象的key
-static JsTlsKey engineKey = NULL;
+static JsTlsKey JsEngineKey = NULL;
 static void JsInitEngineKey();
 
-
+static void JsGcMarkEngine(void* mp, int ms);
+static void JsGcMarkTaskComp(void* mp, int ms);
 
 void JsPrevInitEngine(){
 	JsInitEngineKey();
@@ -33,7 +34,7 @@ void JsPostInitEngine(){
 
 struct JsEngine* JsCreateEngine(){
 	struct JsVm* vm = JsGetVm();
-	struct JsEngine* e = (struct JsEngine*)JsMalloc(sizeof(struct JsEngine));
+	struct JsEngine* e = (struct JsEngine*)JsGcMalloc(sizeof(struct JsEngine),&JsGcMarkEngine,NULL);
 	e->vm = vm;
 	JsEngine2Vm(e);
 	
@@ -58,7 +59,7 @@ void JsDispatch(struct JsContext* c,JsTaskFn task0,void* data){
 		return;
 //添加到wait队列中
 	JsLockup(e->lock);
-	task = (struct JsTaskComp*) JsMalloc(sizeof(struct JsTaskComp));
+	task = (struct JsTaskComp*) JsGcMalloc(sizeof(struct JsTaskComp),&JsGcMarkTaskComp,NULL);
 	task->context = c;
 	task->task = task0;
 	task->data = data;
@@ -81,11 +82,15 @@ void JsDispatch(struct JsContext* c,JsTaskFn task0,void* data){
 		if(task !=NULL){
 			//存在task
 			e->exec = task->context ;
-			JsListRemove(e->waits,JS_LIST_FIRST);
 		}
+		//提交上次运行的内存到主存中
+		JsGcCommit();
 		if(e->exec == NULL){
+			//修改为空闲状态
+			e->state = JS_ENGINE_IDLE;
 			//waits队列中不存在等待的context
 			JsUnlock(e->lock);
+			
 			return;
 		}
 		//记录当前线程信息
@@ -98,6 +103,9 @@ void JsDispatch(struct JsContext* c,JsTaskFn task0,void* data){
 		struct JsContext* tlsContext = JsGetTlsContext();
 		JsSetTlsEngine(e);
 		JsSetTlsContext(e->exec);
+		//修改状态
+		e->state = JS_ENGINE_RUNNING;
+		
 		JS_TRY(0){
 			(*task->task)(e,task->data);
 		}
@@ -113,6 +121,8 @@ void JsDispatch(struct JsContext* c,JsTaskFn task0,void* data){
 		JsSetTlsContext(tlsContext);
 		
 		JsLockup(e->lock);
+		//删除第一个等待task
+		JsListRemove(e->waits,JS_LIST_FIRST);
 		//从pools中剔除exec指向的context
 		JsBurnContext(e,e->exec);
 		e->exec = NULL;
@@ -170,13 +180,30 @@ void JsStopEngine(struct JsEngine* e){
 }
 /*获得当前线程Engine*对象*/
 void JsSetTlsEngine(struct JsEngine* e){
-	JsSetTlsValue(engineKey,e);
+	JsSetTlsValue(JsEngineKey,e);
 }
 struct JsEngine* JsGetTlsEngine(){
 	struct JsEngine* e;
-	e = (struct JsEngine*)JsGetTlsValue(engineKey);
+	e = (struct JsEngine*)JsGetTlsValue(JsEngineKey);
 	return e;
 }
 static void JsInitEngineKey(){
-	engineKey = JsCreateTlsKey(NULL);
+	JsEngineKey = JsCreateTlsKey(NULL);
+	//挂在为Root
+	JsGcRegistKey(JsEngineKey,"JsEngineKey");
+	JsGcMountRoot(JsEngineKey,JsEngineKey);
+}
+static void JsGcMarkEngine(void* mp, int ms){
+	struct JsEngine* e = (struct JsEngine*) mp;
+	JsGcMark(e->vm);
+	JsGcMark(e->exec);
+	JsGcMark(e->waits);
+	JsGcMark(e->pools);
+	JsGcMark(e->lock);
+}
+
+static void JsGcMarkTaskComp(void* mp, int ms){
+	struct JsTaskComp* task = (struct JsTaskComp*)mp;
+	JsGcMark(task->context);
+	JsGcMark(task->data);
 }
