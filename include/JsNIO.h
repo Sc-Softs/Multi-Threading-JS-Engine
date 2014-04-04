@@ -6,8 +6,16 @@
 	注: 新线程中的context的this为Gloabl
 */
 #include"JsType.h"
+
+
+struct JsNIOWorkRes{
+	int argc;
+	struct JsValue **argv;
+};
 /*
-	work 		: 开启线程后, NIO工作, 可以为NULL
+	work 		: 开启线程后, NIO工作, 可以为NULL, 返回的可以是一个
+					struct JsNIOWorkRes* 给等待调用函数的参数或者NULL
+		
 	data 		: 传递给work的数据包
 	o    		: 完成工作后, 调用的Js函数, 可以为NULL
 	openEngine	: 是否开启新引擎单元来完成该工作.

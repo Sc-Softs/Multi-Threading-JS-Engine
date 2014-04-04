@@ -67,11 +67,8 @@ typedef void (*JsGcMarkFn)(void* mp,int ms);
 		ms 为申请内存的大小
 */
 typedef void (*JsGcFreeFn)(void* mp,int ms);
-/*
-	调用TrapGc的时候, 检测到需要进行Gc, 则调用该函数, 完成等待Gc
-前需要完成的工作
-*/
-typedef void (*JsGcTrapFn)(void* data);
+
+
 /*NaN 数据类型*/
 #define JS_VALUE_NUMBER_NAN 		((double)(0.0/0.0))
 

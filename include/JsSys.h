@@ -33,7 +33,6 @@ void* JsGcReAlloc(void* mp,int newSize);
 		1 	: 先前标记过
 		-1	: 不在Gc管理的内存中
 	*一个属性是否被Mark到, 在于父容器是否对该属性所在的MP(内存地址)进行Mark
-	*该函数的运行时机为GC阶段, 非GC时段运行该函数会出错
 */
 int JsGcMark(void* mp);
 /*
@@ -49,8 +48,18 @@ int JsGcRegistKey(void* key,const char* desc);
 void JsGcBurnKey(void* key);
 /*Gc扫描的时候, Root节点配置*/
 void JsGcMountRoot(void* mp,void* key);
-/*提交当前线程内存到主存中*/
-void JsGcCommit();
+/*
+	关系图完整性API:
+		*正在处理A->B 关系图为 A->C->B的时候, 
+	变成A , C , B 的引用方式, 而导致B被回收.
+	
+	例如:
+		在NIO中, 处理 Context->scope.push(object), 的操作的时候
+	需要结冻GC, 避免被错误回收
+*/
+void JsGcFreeze();
+void JsGcUnfreeze();
+
 /****************************锁模块 API**********************************/
 /*锁 API*/
 JsLock JsCreateLock();

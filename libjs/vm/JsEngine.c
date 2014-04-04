@@ -83,9 +83,8 @@ void JsDispatch(struct JsContext* c,JsTaskFn task0,void* data){
 			//存在task
 			e->exec = task->context ;
 		}
-		//提交上次运行的内存到主存中
-		JsGcCommit();
 		if(e->exec == NULL){
+			//printf("Engine Goto IDLE\n");
 			//修改为空闲状态
 			e->state = JS_ENGINE_IDLE;
 			//waits队列中不存在等待的context

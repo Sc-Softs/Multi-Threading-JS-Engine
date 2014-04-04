@@ -19,10 +19,19 @@ struct JsNIOData{
 	struct JsContext* context;
 	struct JsObject* function;
 };
+struct JsNIOTaskData{
+	int argc;
+	struct JsValue** argv;
+	struct JsObject* function;
+};
+
 
 static void* JsNIOWork(void* data);
 static void JsNIOTask(struct JsEngine* e,void* data);
+
+
 static void JsGcMarkNIOData(void* mp,int ms);
+static void JsGcMarkNIOTaskData(void* mp,int ms);
 /*
 	work 		: 开启线程后, NIO工作
 	data 		: 传递给work的数据包
@@ -61,10 +70,10 @@ JsThread JsNIO(JsThreadFn work,void* data, struct JsObject* o, int openEngine){
 	return thread;
 }
 
-
 static void* JsNIOWork(void* data){
 	struct JsValue* error = NULL;
 	struct JsNIOData* p = (struct JsNIOData*)data;
+	struct JsNIOWorkRes* workRes = NULL;
 	//设置本线程的JsContext
 	JsSetTlsContext( p->context);
 	//填充当前线程信息
@@ -73,7 +82,7 @@ static void* JsNIOWork(void* data){
 	JS_TRY(0){
 		//DO NIO WORK
 		if(p->work != NULL)
-			(*p->work)(p->data);
+			workRes = (struct JsNIOWorkRes*)(*p->work)(p->data);
 	}
 	JS_CATCH(error){
 		JsPrintValue(error);
@@ -84,8 +93,21 @@ static void* JsNIOWork(void* data){
 		return NULL;
 	}
 	//Finish
-	if(p->function != NULL)
-		JsDispatch(p->context,&JsNIOTask,p->function);
+	if(p->function != NULL){
+
+		struct JsNIOTaskData* taskData = (struct JsNIOTaskData*)JsGcMalloc(
+				sizeof(struct JsNIOTaskData),&JsGcMarkNIOTaskData,NULL);
+		//挂载到Context上
+		JsGcMountRoot(taskData,p->context);
+		taskData->function = p->function;
+		taskData->argc = 0;
+		taskData->argv = NULL;
+		if(workRes != NULL){
+			taskData->argc = workRes->argc;
+			taskData->argv = workRes->argv;
+		}
+		JsDispatch(p->context,&JsNIOTask,taskData);
+	}
 	else
 		JsBurnContext(p->context->engine,p->context);
 	p->context->thread = NULL;
@@ -95,9 +117,9 @@ static void* JsNIOWork(void* data){
 static void JsNIOTask(struct JsEngine* e,void* data){
 	struct JsValue res;
 	struct JsContext* c = JsGetTlsContext();
-	struct JsObject* p =(struct JsObject*)data;
+	struct JsNIOTaskData* p =(struct JsNIOTaskData*)data;
 	
-	(*p->Call)(p,c->thisObj,0,NULL,&res);
+	(*p->function->Call)(p->function,c->thisObj,p->argc,p->argv,&res);
 }
 
 static void JsGcMarkNIOData(void* mp,int ms){
@@ -105,4 +127,9 @@ static void JsGcMarkNIOData(void* mp,int ms){
 	JsGcMark(nio->data);
 	JsGcMark(nio->context);
 	JsGcMark(nio->function);
+}
+static void JsGcMarkNIOTaskData(void* mp,int ms){
+	struct JsNIOTaskData* t =(struct JsNIOTaskData*)mp;
+	JsGcMark(t->argv);
+	JsGcMark(t->function);
 }

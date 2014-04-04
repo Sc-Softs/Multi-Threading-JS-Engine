@@ -19,7 +19,6 @@ struct JsEngine{
 		JS_ENGINE_RUNNING,//运行Source中
 		JS_ENGINE_STOPPED,//被关闭后, 不会再启动
 		JS_ENGINE_IDLE,//空闲状态
-		JS_ENGINE_GC//Engine可以被GC的状态, 在内存到达警戒线的时候的状态
 	}state;
 	
 	/*临界资源 正在执行的JsContext*/

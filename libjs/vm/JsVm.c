@@ -69,7 +69,25 @@ struct JsVm* JsGetVm(){
 	return g_JsVm;
 }
 
-
+/*锁住VM*/
+void JsLockVm(){
+	JsLockup(g_JsVm->lock);
+	int size = JsListSize(g_JsVm->engines);
+	int i;
+	for(i=0;i<size;++i){
+		struct JsEngine* e = JsListGet(g_JsVm->engines,i);
+		JsLockup(e->lock);
+	}
+}
+void JsUnlockVm(){
+	int size = JsListSize(g_JsVm->engines);
+	int i;
+	for(i=0;i<size;++i){
+		struct JsEngine* e = JsListGet(g_JsVm->engines,i);
+		JsUnlock(e->lock);
+	}
+	JsUnlock(g_JsVm->lock);
+}
 static void JsPrevInitModules(){
 	//.h中声明为 JsPrevInitializeModule 的API
 	JsPrevInitSys();
