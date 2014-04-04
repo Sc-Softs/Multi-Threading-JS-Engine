@@ -822,11 +822,14 @@ static void JsGcFreeMainHtNode(){
 				(*nodepp)->mc++;
 				//printf("The Node %p Miss: %d \n",(*nodepp),(*nodepp)->mc);
 				if((*nodepp)->mc >= JS_GC_MISS){
-					
-					//符合释放条件, 则释放内存
-					void* mp = (*nodepp)->mp;
+				
 					struct JsGcHtNode* nodep = *nodepp;
-					struct JsGcBlock* bp ;
+					//修改nodepp,指向该节点的下一个位置
+					*nodepp = (*nodepp)->next;
+					
+					//进入释放内存的步骤
+					void* mp = nodep->mp;
+					struct JsGcBlock* bp = NULL;
 					//删除以该地址为Key的条目(TRY，可能不是Key)
 					JsGcBurnKey(mp);
 					JS_MP2BP(mp,bp);
@@ -838,10 +841,9 @@ static void JsGcFreeMainHtNode(){
 					//释放内存
 					free(bp);
 					free(nodep);
-					//修改nodepp,指向该节点的下一个位置
-					*nodepp = (*nodepp)->next;
+					
 				}else{
-					//未到回收标准, 等待下一次回收
+					//MISS计数还不够, 等待下一次回收
 					nodepp = &(*nodepp)->next;
 				}
 			}else{
