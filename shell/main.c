@@ -85,8 +85,8 @@ int main(){
 	int i = 0;
 	for( i = 0 ; i < 3; ++i){
 		struct JsContext* c = JsCreateContext(e, NULL);
+		JsDispatch(c,&JsContextTask,NULL);
 		sleep(10);
-		JsDispatch(c,&JsContextTask,NULL);		
 	}
 	//安全推出主线程
 	JsCloseSelf();

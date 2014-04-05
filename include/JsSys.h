@@ -60,6 +60,11 @@ void JsGcMountRoot(void* mp,void* key);
 void JsGcFreeze();
 void JsGcUnfreeze();
 
+/*	
+	将当前TLS中的内存刷入主存中, 让GC可以进行回收, 
+	这时候, 需要确定关系图的完整性(一般不调用)
+*/
+void JsGcCommit();
 /****************************锁模块 API**********************************/
 /*锁 API*/
 JsLock JsCreateLock();

@@ -59,6 +59,7 @@ void JsHaltVm(){
 	JsHalt();
 }
 void JsEngine2Vm(struct JsEngine* e){
+
 	JsAssert(g_JsVm != NULL && e != NULL);
 	JsLockup(g_JsVm->lock);
 	JsListPush(g_JsVm->engines,e);

@@ -23,6 +23,7 @@ static JsTlsKey JsEngineKey = NULL;
 static void JsInitEngineKey();
 
 static void JsGcMarkEngine(void* mp, int ms);
+static void JsGcFreeEngine(void* mp,int size);
 static void JsGcMarkTaskComp(void* mp, int ms);
 
 void JsPrevInitEngine(){
@@ -34,10 +35,8 @@ void JsPostInitEngine(){
 
 struct JsEngine* JsCreateEngine(){
 	struct JsVm* vm = JsGetVm();
-	struct JsEngine* e = (struct JsEngine*)JsGcMalloc(sizeof(struct JsEngine),&JsGcMarkEngine,NULL);
+	struct JsEngine* e = (struct JsEngine*)JsGcMalloc(sizeof(struct JsEngine),&JsGcMarkEngine,&JsGcFreeEngine);
 	e->vm = vm;
-	JsEngine2Vm(e);
-	
 	e->state = JS_ENGINE_NEW;
 	
 	e->exec = NULL;
@@ -45,6 +44,8 @@ struct JsEngine* JsCreateEngine(){
 	e->pools = JsCreateList();
 	
 	e->lock = JsCreateLock();
+	
+	JsEngine2Vm(e);
 	return e;
 }
 
@@ -71,8 +72,10 @@ void JsDispatch(struct JsContext* c,JsTaskFn task0,void* data){
 	JsUnlock(e->lock);
 //循环执行waits队列
 	while(TRUE){
+		//提交本次Tls内存到主存中
+		JsGcCommit();
+		
 		JsLockup(e->lock);
-
 		if(e->exec != NULL){
 			JsUnlock(e->lock);
 			return;
@@ -126,6 +129,9 @@ void JsDispatch(struct JsContext* c,JsTaskFn task0,void* data){
 		JsBurnContext(e,e->exec);
 		e->exec = NULL;
 		JsUnlock(e->lock);
+		
+		//提交本次Tls内存到主存中
+		JsGcCommit();
 	}
 
 }
@@ -200,7 +206,9 @@ static void JsGcMarkEngine(void* mp, int ms){
 	JsGcMark(e->pools);
 	JsGcMark(e->lock);
 }
-
+static void JsGcFreeEngine(void* mp,int size){
+	//JsAssert(FALSE);
+}
 static void JsGcMarkTaskComp(void* mp, int ms){
 	struct JsTaskComp* task = (struct JsTaskComp*)mp;
 	JsGcMark(task->context);
