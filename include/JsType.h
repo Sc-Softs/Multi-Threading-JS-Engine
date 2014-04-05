@@ -35,7 +35,7 @@ typedef void (*JsTlsFn)(void *data);
 typedef void* JsThread;
 /* Js锁*/
 typedef void* JsLock;
-/* 线程函数, NIO配合工作的函数指针 */
+/* 线程函数, Async 配合工作的函数指针 */
 typedef void* (*JsThreadFn)(void* data);
 
 /* 调试函数指针 */

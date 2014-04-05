@@ -10,7 +10,7 @@
 #include"JsAst.h"
 #include"JsParser.h"
 #include"JsEval.h"
-#include"JsNIO.h"
+#include"JsAsync.h"
 #include"JsECMAScript.h"
 #include<stdlib.h>
 #include<stdio.h>
@@ -142,7 +142,7 @@ static void JsSetTimeout(struct JsObject *self, struct JsObject *thisobj, int ar
 		&& argv[1]->type == JS_NUMBER &&argv[1]->u.number >=0 ){
 		int* data = (int*)JsGcMalloc(sizeof(int),NULL,NULL);
 		*data = argv[1]->u.number;
-		JsNIO(&JsSetTimeoutWork,data,argv[0]->u.object,FALSE);
+		JsAsync(&JsSetTimeoutWork,data,argv[0]->u.object,FALSE);
 	}else{
 		JsThrowString("TypeError");
 	}

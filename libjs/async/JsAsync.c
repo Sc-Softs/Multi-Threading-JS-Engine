@@ -1,4 +1,4 @@
-#include"JsNIO.h"
+#include"JsAsync.h"
 #include"JsObject.h"
 #include"JsContext.h"
 #include"JsEngine.h"
@@ -13,52 +13,48 @@
 #include<stdio.h>
 #include<string.h>
 #include<setjmp.h>
-struct JsNIOData{
+struct JsAsyncData{
 	JsThreadFn work;
 	void* data;
 	struct JsContext* context;
 	struct JsObject* function;
 };
-struct JsNIOTaskData{
+struct JsAsyncTaskData{
 	int argc;
 	struct JsValue** argv;
 	struct JsObject* function;
 };
 
 
-static void* JsNIOWork(void* data);
-static void JsNIOTask(struct JsEngine* e,void* data);
+static void* JsAsyncWork(void* data);
+static void JsAsyncTask(struct JsEngine* e,void* data);
 
 
-static void JsGcMarkNIOData(void* mp,int ms);
-static void JsGcMarkNIOTaskData(void* mp,int ms);
-/*
-	work 		: 开启线程后, NIO工作
-	data 		: 传递给work的数据包
-	o    		: 完成工作后, 调用的Js函数
-	openEngine	: 是否开启新引擎单元来完成该工作.
-*/
-JsThread JsNIO(JsThreadFn work,void* data, struct JsObject* o, int openEngine){
+static void JsGcMarkAsyncData(void* mp,int ms);
+static void JsGcMarkAsyncTaskData(void* mp,int ms);
 
-	if((o!= NULL) && 
-		(o == NULL  ||o->Call == NULL))
-			JsThrowString("Object Is't Function");
-	struct JsEngine* e;
-	struct JsContext* c;
+JsThread JsAsync(JsThreadFn work,void* data, struct JsObject* o, int openEngine){
+
+	struct JsEngine* e = NULL;
+	struct JsContext* c = NULL;
 	c = JsGetTlsContext();
 	e = c->engine;
 	if(openEngine == TRUE){
 		//开启新引擎 
 		e = JsCreateEngine();
+		if(o== NULL || o->Call == NULL){
+			//开启新引擎, 缺没有一个回调函数, 则开启是错误的
+			JsAssert(FALSE);
+		}
 	}
 	//创建新上下文
 	c = JsCreateContext(e,c);
 	//统一为Global对象
 	c->thisObj = JsGetVm()->Global;
 	//配置传递数据
-	struct JsNIOData* p =( struct JsNIOData* ) JsGcMalloc(sizeof(struct JsNIOData),&JsGcMarkNIOData,NULL);
+	struct JsAsyncData* p =( struct JsAsyncData* ) JsGcMalloc(sizeof(struct JsAsyncData),&JsGcMarkAsyncData,NULL);
 	//配置为关联数据, 和新Context关联
-	JsGcRegistKey(c,"NIO Context");
+	JsGcRegistKey(c,"Async Context");
 	JsGcMountRoot(p,c);
 	
 	
@@ -66,23 +62,23 @@ JsThread JsNIO(JsThreadFn work,void* data, struct JsObject* o, int openEngine){
 	p->data = data;
 	p->context = c;
 	p->function = o;
-	JsThread thread = JsStartThread(&JsNIOWork,p);
+	JsThread thread = JsStartThread(&JsAsyncWork,p);
 	return thread;
 }
 
-static void* JsNIOWork(void* data){
+static void* JsAsyncWork(void* data){
 	struct JsValue* error = NULL;
-	struct JsNIOData* p = (struct JsNIOData*)data;
-	struct JsNIOWorkRes* workRes = NULL;
+	struct JsAsyncData* p = (struct JsAsyncData*)data;
+	struct JsAsyncWR* workRes = NULL;
 	//设置本线程的JsContext
 	JsSetTlsContext( p->context);
 	//填充当前线程信息
 	p->context->thread = JsCurThread();
 	
 	JS_TRY(0){
-		//DO NIO WORK
+		//DO Async WORK
 		if(p->work != NULL)
-			workRes = (struct JsNIOWorkRes*)(*p->work)(p->data);
+			workRes = (struct JsAsyncWR*)(*p->work)(p->data);
 	}
 	JS_CATCH(error){
 		JsPrintValue(error);
@@ -93,10 +89,10 @@ static void* JsNIOWork(void* data){
 		return NULL;
 	}
 	//Finish
-	if(p->function != NULL){
+	if(p->function != NULL && p->function->Call != NULL){
 
-		struct JsNIOTaskData* taskData = (struct JsNIOTaskData*)JsGcMalloc(
-				sizeof(struct JsNIOTaskData),&JsGcMarkNIOTaskData,NULL);
+		struct JsAsyncTaskData* taskData = (struct JsAsyncTaskData*)JsGcMalloc(
+				sizeof(struct JsAsyncTaskData),&JsGcMarkAsyncTaskData,NULL);
 		//挂载到Context上
 		JsGcMountRoot(taskData,p->context);
 		taskData->function = p->function;
@@ -106,7 +102,8 @@ static void* JsNIOWork(void* data){
 			taskData->argc = workRes->argc;
 			taskData->argv = workRes->argv;
 		}
-		JsDispatch(p->context,&JsNIOTask,taskData);
+		//调入Engine中轮转
+		JsDispatch(p->context,&JsAsyncTask,taskData);
 	}
 	else
 		JsBurnContext(p->context->engine,p->context);
@@ -114,22 +111,22 @@ static void* JsNIOWork(void* data){
 	return NULL;
 }
 //被Dispatch 调用的task
-static void JsNIOTask(struct JsEngine* e,void* data){
+static void JsAsyncTask(struct JsEngine* e,void* data){
 	struct JsValue res;
 	struct JsContext* c = JsGetTlsContext();
-	struct JsNIOTaskData* p =(struct JsNIOTaskData*)data;
+	struct JsAsyncTaskData* p =(struct JsAsyncTaskData*)data;
 	
 	(*p->function->Call)(p->function,c->thisObj,p->argc,p->argv,&res);
 }
 
-static void JsGcMarkNIOData(void* mp,int ms){
-	struct JsNIOData* nio = (struct JsNIOData*)mp;
-	JsGcMark(nio->data);
-	JsGcMark(nio->context);
-	JsGcMark(nio->function);
+static void JsGcMarkAsyncData(void* mp,int ms){
+	struct JsAsyncData* p = (struct JsAsyncData*)mp;
+	JsGcMark(p->data);
+	JsGcMark(p->context);
+	JsGcMark(p->function);
 }
-static void JsGcMarkNIOTaskData(void* mp,int ms){
-	struct JsNIOTaskData* t =(struct JsNIOTaskData*)mp;
+static void JsGcMarkAsyncTaskData(void* mp,int ms){
+	struct JsAsyncTaskData* t =(struct JsAsyncTaskData*)mp;
 	JsGcMark(t->argv);
 	JsGcMark(t->function);
 }

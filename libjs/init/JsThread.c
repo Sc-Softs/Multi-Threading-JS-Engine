@@ -7,7 +7,7 @@
 #include"JsSys.h"
 #include"JsDebug.h"
 #include"JsAst.h"
-#include"JsNIO.h"
+#include"JsAsync.h"
 #include"JsECMAScript.h"
 #include"JsException.h"
 #include<stdlib.h>
@@ -107,7 +107,7 @@ static void JsStart(struct JsObject *self, struct JsObject *thisobj,
 	if(argc >=0 &&argv[0]->type == JS_OBJECT && 
 		argv[0]->u.object != NULL && argv[0]->u.object->Call != NULL){
 		//pass test
-		JsThread thread = JsNIO(NULL,NULL,argv[0]->u.object,TRUE);
+		JsThread thread = JsAsync(NULL,NULL,argv[0]->u.object,TRUE);
 		res->type = JS_OBJECT;
 		res->u.object = JsCreateMockThread(thread);
 	}else{

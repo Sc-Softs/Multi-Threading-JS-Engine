@@ -170,7 +170,7 @@ void JsStopEngine(struct JsEngine* e){
 	for( i = 0 ; i < size ; ++i){
 		c = (struct JsContext*)JsListGet(e->pools,i);
 		if(c->thread){
-			//停止nio线程
+			//停止从属于该Engine的async线程
 			JsCloseThread(c->thread);
 			c->thread = NULL;
 		}
