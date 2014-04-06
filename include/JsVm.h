@@ -50,7 +50,7 @@ void JsHaltVm();
 /*
 	创建新的JsEngine的时候, 需要把它关联到它所在的VM
 */
-void JsEngine2Vm(struct JsEngine* e);
+void JsEnginePiVm(struct JsEngine* e);
 /*锁住VM 和  Engine*/
 void JsLockVm();
 void JsUnlockVm();

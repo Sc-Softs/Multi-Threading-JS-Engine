@@ -82,12 +82,10 @@ int main(){
 	JsCreateVm(TRUE,0,NULL, NULL);
 	CreatePrintFn();
 	struct JsEngine* e = JsCreateEngine();
-	int i = 0;
-	for( i = 0 ; i < 3; ++i){
-		struct JsContext* c = JsCreateContext(e, NULL);
-		JsDispatch(c,&JsContextTask,NULL);
-		sleep(10);
-	}
+
+	struct JsContext* c = JsCreateContext(e, NULL,"Main Context");
+	JsDispatch(c,&JsContextTask,NULL);
+	
 	//安全推出主线程
 	JsCloseSelf();
 	return 0;

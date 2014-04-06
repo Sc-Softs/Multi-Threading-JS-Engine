@@ -26,19 +26,24 @@ void JsPostInitContext(){
 }
 
 
-struct JsContext* JsCreateContext(struct JsEngine* e, struct JsContext* c){
+struct JsContext* JsCreateContext(struct JsEngine* e, struct JsContext* c,char* desc){
 			
 	struct JsContext* context;
 	JsAssert(e != NULL);
 	context = JsCopyContext(c);
 	context->engine = e;
 	//注册到JsEngine中
-	JsContext2Engine(e,context);
+	JsContextPiEngine(e,context);
+	//注册该Context为Key到JsGcKeyMan
+	JsGcRegistKey(context,desc);
 	context->thread = NULL;
 
 	return context;	
 }
-
+void JsBurnContext(struct JsContext* c){
+	JsGcBurnKey(c);
+	JsContextPoEngine(c->engine,c);
+}
 struct JsContext* JsCopyContext(struct JsContext* c){
 	struct JsContext* context;
 	

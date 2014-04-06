@@ -48,13 +48,11 @@ JsThread JsAsync(JsThreadFn work,void* data, struct JsObject* o, int openEngine)
 		}
 	}
 	//创建新上下文
-	c = JsCreateContext(e,c);
+	c = JsCreateContext(e,c,"Async Context");
 	//统一为Global对象
 	c->thisObj = JsGetVm()->Global;
 	//配置传递数据
 	struct JsAsyncData* p =( struct JsAsyncData* ) JsGcMalloc(sizeof(struct JsAsyncData),&JsGcMarkAsyncData,NULL);
-	//配置为关联数据, 和新Context关联
-	JsGcRegistKey(c,"Async Context");
 	JsGcMountRoot(p,c);
 	
 	
@@ -83,8 +81,8 @@ static void* JsAsyncWork(void* data){
 	JS_CATCH(error){
 		JsPrintValue(error);
 		JsPrintStack(JsGetExceptionStack());
-		//从Engine中删除该context
-		JsBurnContext(p->context->engine,p->context);
+		//删除该Context
+		JsBurnContext(p->context);
 		p->context->thread = NULL;
 		return NULL;
 	}
@@ -106,7 +104,7 @@ static void* JsAsyncWork(void* data){
 		JsDispatch(p->context,&JsAsyncTask,taskData);
 	}
 	else
-		JsBurnContext(p->context->engine,p->context);
+		JsBurnContext(p->context);
 	p->context->thread = NULL;
 	return NULL;
 }

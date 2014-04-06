@@ -59,20 +59,30 @@ struct JsContext{
 void JsPrevInitContext();
 void JsPostInitContext();
 /*
-	创建新的JsContext
+	创建新的JsContext, 并且把该context作为Key注册到为GcKeyMan
+此时, 和该JsContext生命周期一致的内存快可以和该context关联.
+
 	如果 c == NULL, 则配置为全局Context类型
 	否则 拷贝c
 	*最后把该context注册到JsEngine中
 */
-struct JsContext* JsCreateContext(struct JsEngine* e, struct JsContext* c);
+struct JsContext* JsCreateContext(struct JsEngine* e, struct JsContext* c,char* desc);
 			
 /*
-	创建新的JsContext
+	拷贝JsContext, 不把该Context作为Key注册到GcKeyMan中
 	如果 c == NULL,则配置为全局Context
 	否则 拷贝c
 	*纯粹的拷贝context, 不进行注册到JsEngine中.
 */	
-struct JsContext* JsCopyContext(struct JsContext* c);	
+struct JsContext* JsCopyContext(struct JsContext* c);
+/*
+	当该Context在Vm中无效的时候, 调用它, 用来取消和Engine的关联
+和注册到JsGcKeyMan中的Key.
+	注意:
+		那些以该Context为Key的内存快如果没有再被其他对象引用, 则
+	会被回收.
+*/
+void JsBurnContext(struct JsContext* c);
 /*
 	
 	这两个个函数是非线程安全的, 如果在查询过程中发生属性被

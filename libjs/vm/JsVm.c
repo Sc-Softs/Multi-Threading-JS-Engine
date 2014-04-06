@@ -58,7 +58,7 @@ struct JsVm* JsCreateVm(int debug,int mSize, char** mPath,
 void JsHaltVm(){
 	JsHalt();
 }
-void JsEngine2Vm(struct JsEngine* e){
+void JsEnginePiVm(struct JsEngine* e){
 
 	JsAssert(g_JsVm != NULL && e != NULL);
 	JsLockup(g_JsVm->lock);

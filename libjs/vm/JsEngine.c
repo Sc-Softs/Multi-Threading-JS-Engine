@@ -45,7 +45,7 @@ struct JsEngine* JsCreateEngine(){
 	
 	e->lock = JsCreateLock();
 	
-	JsEngine2Vm(e);
+	JsEnginePiVm(e);
 	return e;
 }
 
@@ -125,8 +125,8 @@ void JsDispatch(struct JsContext* c,JsTaskFn task0,void* data){
 		JsLockup(e->lock);
 		//删除第一个等待task
 		JsListRemove(e->waits,JS_LIST_FIRST);
-		//从pools中剔除exec指向的context
-		JsBurnContext(e,e->exec);
+		//因为执行完该Context之后, 就失效了,所以从Vm中消去该Context
+		JsBurnContext(e->exec);
 		e->exec = NULL;
 		JsUnlock(e->lock);
 		
@@ -136,13 +136,13 @@ void JsDispatch(struct JsContext* c,JsTaskFn task0,void* data){
 
 }
 //注册一个新的context到reg中, lock
-void JsContext2Engine(struct JsEngine* e, struct JsContext* c){
+void JsContextPiEngine(struct JsEngine* e, struct JsContext* c){
 	JsAssert(e != NULL && c != NULL);
 	JsLockup(e->lock);
 	JsListPush(e->pools,c);
 	JsUnlock(e->lock);
 }
-void JsBurnContext(struct JsEngine* e, struct JsContext* c){
+void JsContextPoEngine(struct JsEngine* e, struct JsContext* c){
 	JsAssert(e != NULL && c != NULL);
 	JsLockup(e->lock);
 	//从pools中剔除exec指向的context
