@@ -95,7 +95,7 @@ static	void JsNumberConstConstruct(struct JsObject *self, struct JsObject *thiso
 }
 static void JsNumberProtoInit(struct JsObject* number,struct JsObject* number_proto){
 	
-	struct JsValue* p = JsCreateValue();
+	struct JsValue* p = NULL;
 	//Number.prototype.constructor
 	p= JsCreateValue();
 	p->type = JS_OBJECT;

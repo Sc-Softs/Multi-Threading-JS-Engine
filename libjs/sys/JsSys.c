@@ -25,7 +25,7 @@
 #define JS_GC_ROOT_TABLE_SIZE  		1024
 //检测到内存到达上限, 则会停止所有线程进入GC
 //(单位 : KB)
-#define JS_GC_MEMORY_LINE 			10
+#define JS_GC_MEMORY_LINE 			1024*50
 //未命中数值, 一旦内存快(主存中的)未命中次数到达指定数, 则回收
 //为1的时候, 表示一旦扫表到为标中对象, 则马上回收
 #define JS_GC_MISS 					1
@@ -314,6 +314,12 @@ void* JsGcMalloc(int size,JsGcMarkFn markFn,JsGcFreeFn freeFn){
 	JS_BP2MP(bp,mp);
 	//获得Tls的table
 	struct JsGcTlsNode* node = (struct JsGcTlsNode*)pthread_getspecific(*JsGcTlsKey);
+	if(node == NULL){
+		//当前线程Tls没有开启, 调用开启函数
+		JsGcTBegin();
+		node = (struct JsGcTlsNode*)pthread_getspecific(*JsGcTlsKey);
+		JsAssert(node != NULL);
+	}
 	//加锁, 防止GC线程破坏插入过程
 	pthread_mutex_lock(node->lock);
 	//插入Tls->Ht中
@@ -338,6 +344,12 @@ void* JsGcReAlloc(void* mp0,int newSize){
 	
 	//判断是否在Tls还是Main中(Tls把内存已经Commit到主存了)
 	struct JsGcTlsNode* node = (struct JsGcTlsNode*)pthread_getspecific(*JsGcTlsKey);
+	if(node == NULL){
+		//当前线程Tls没有开启, 调用开启函数
+		JsGcTBegin();
+		node = (struct JsGcTlsNode*)pthread_getspecific(*JsGcTlsKey);
+		JsAssert(node != NULL);
+	}
 	pthread_mutex_lock(node->lock);
 	struct JsGcHtNode* htNode = JsGcFindHtNode(node->table,mp0);
 	if(htNode != NULL){
@@ -888,8 +900,9 @@ static void JsGcBtTls(){
 	//配置计数锁
 	node->lock = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
 	pthread_mutexattr_t lockAttr;
-	pthread_mutexattr_setpshared(&lockAttr, PTHREAD_PROCESS_PRIVATE);
-	pthread_mutexattr_settype(&lockAttr ,PTHREAD_MUTEX_RECURSIVE);
+	pthread_mutexattr_init(&lockAttr);
+	//pthread_mutexattr_setpshared(&lockAttr, PTHREAD_PROCESS_PRIVATE);
+	pthread_mutexattr_settype(&lockAttr ,PTHREAD_MUTEX_RECURSIVE_NP);
 	pthread_mutex_init(node->lock,&lockAttr);
 	
 	//放在 JsGcTlsList 第一个位置
@@ -985,8 +998,9 @@ static void JsPrevInitGc(){
 
 	//计数锁属性
 	pthread_mutexattr_t lockAttr;
-	pthread_mutexattr_setpshared(&lockAttr, PTHREAD_PROCESS_PRIVATE);
-	pthread_mutexattr_settype(&lockAttr ,PTHREAD_MUTEX_RECURSIVE);
+	pthread_mutexattr_init(&lockAttr);
+	//pthread_mutexattr_setpshared(&lockAttr, PTHREAD_PROCESS_PRIVATE);
+	pthread_mutexattr_settype(&lockAttr ,PTHREAD_MUTEX_RECURSIVE_NP);
 	
 	//初始化JsGcLock, 配置一个计数类型的Lock
 	JsGcLock = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
@@ -1043,8 +1057,8 @@ void JsUnlock(JsLock lock){
 static void JsInitLockAttr(){
 	JsLockAttr = (pthread_mutexattr_t*) JsGcMalloc(sizeof(pthread_mutexattr_t),NULL,NULL);
 	pthread_mutexattr_init(JsLockAttr);
-	pthread_mutexattr_setpshared(JsLockAttr, PTHREAD_PROCESS_PRIVATE);
-	pthread_mutexattr_settype(JsLockAttr ,PTHREAD_MUTEX_RECURSIVE);
+	//pthread_mutexattr_setpshared(JsLockAttr, PTHREAD_PROCESS_PRIVATE);
+	pthread_mutexattr_settype(JsLockAttr ,PTHREAD_MUTEX_RECURSIVE_NP);
 	//挂为Root
 	JsGcRegistKey(JsLockAttr,"LockAttr");
 	JsGcMountRoot(JsLockAttr,JsLockAttr);
