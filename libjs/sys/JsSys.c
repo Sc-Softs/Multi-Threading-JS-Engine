@@ -25,7 +25,7 @@
 #define JS_GC_ROOT_TABLE_SIZE  		1024
 //检测到内存到达上限, 则会停止所有线程进入GC
 //(单位 : KB)
-#define JS_GC_MEMORY_LINE 			1024*50
+#define JS_GC_MEMORY_LINE 			1024
 //未命中数值, 一旦内存快(主存中的)未命中次数到达指定数, 则回收
 //为1的时候, 表示一旦扫表到为标中对象, 则马上回收
 #define JS_GC_MISS 					1
@@ -735,29 +735,25 @@ static void* JsGcThread(void* data){
 		//锁住vm 和 引擎
 		JsLockVm();
 		JsGcLockAll();
-		//检测是否可以进行GC
-		int doGc = JsGcTest();
-		if(doGc){
 
-			int flag = TRUE;
-			int i,size;
-			size = JsListSize(JsGetVm()->engines);
-			//检测Engine状态
-			for(i=0;i<size;++i){
-				struct JsEngine* engine = JsListGet(JsGetVm()->engines,i);
-				
-				if(engine->state != JS_ENGINE_IDLE){
-					//发现有引擎处于非IDLE状态
-					flag = FALSE;
-					break;
-				}
+		int flag = TRUE;
+		int i,size;
+		size = JsListSize(JsGetVm()->engines);
+		//检测Engine状态
+		for(i=0;i<size;++i){
+			struct JsEngine* engine = JsListGet(JsGetVm()->engines,i);
+			
+			if(engine->state != JS_ENGINE_IDLE){
+				//发现有引擎处于非IDLE状态
+				flag = FALSE;
+				break;
 			}
-			if(flag == TRUE){
-				//进入Gc工作
-				printf("Goto GC\n");
-				JsGcWork();
-				printf("Finish GC\n");
-			}
+		}
+		if(flag == TRUE && JsGcTest()){
+			//进入Gc工作
+			printf("Goto GC\n");
+			JsGcWork();
+			printf("Finish GC\n");
 		}
 		JsGcUnlockAll();
 		JsUnlockVm();
@@ -944,7 +940,7 @@ static void JsGcEtTls(void *data){
 /*锁住全部内存块*/
 static void JsGcLockAll(){
 	struct JsGcTlsNode** tlspp = NULL;
-	pthread_mutex_unlock(JsGcLock);
+	pthread_mutex_lock(JsGcLock);
 	//解锁所有tls
 	tlspp = &JsGcTlsList;
 	while(*tlspp != NULL){
